@@ -1,0 +1,96 @@
+version: '3.8'
+
+# Note: The orchestrator script will selectively start one client at a time using `docker-compose up <client_name>`
+services:
+  nethermind:
+    image: nethermind/nethermind:latest
+    container_name: benchmark_nethermind
+    volumes:
+      - nethermind_data:/nethermind/data
+    ports:
+      - 8545:8545
+      - 8551:8551
+      - 6060:6060 # Metrics
+    command:
+      - --config=mainnet
+      - --JsonRpc.Enabled=true
+      - --JsonRpc.Host=0.0.0.0
+      - --Metrics.Enabled=true
+      - --Metrics.ExposePort=6060
+      - --Sync.SnapSync=true
+
+  geth:
+    image: ethereum/client-go:latest
+    container_name: benchmark_geth
+    volumes:
+      - geth_data:/root/.ethereum
+    ports:
+      - 8545:8545
+      - 8551:8551
+      - 6060:6060
+    command:
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.api=eth,net,web3
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+      - --syncmode=snap
+
+  besu:
+    image: hyperledger/besu:latest
+    container_name: benchmark_besu
+    volumes:
+      - besu_data:/opt/besu/data
+    ports:
+      - 8545:8545
+      - 8551:8551
+      - 9545:9545 # Metrics
+    command:
+      - --network=mainnet
+      - --rpc-http-enabled
+      - --rpc-http-host=0.0.0.0
+      - --rpc-http-api=ETH,NET,WEB3
+      - --metrics-enabled
+      - --metrics-host=0.0.0.0
+      - --sync-mode=SNAP
+
+  reth:
+    image: ghcr.io/paradigmxyz/reth:latest
+    container_name: benchmark_reth
+    volumes:
+      - reth_data:/root/.local/share/reth/mainnet
+    ports:
+      - 8545:8545
+      - 8551:8551
+      - 9001:9001 # Metrics
+    command:
+      - node
+      - --chain=mainnet
+      - --http
+      - --http.addr=0.0.0.0
+      - --metrics=0.0.0.0:9001
+
+  erigon:
+    image: erigontech/erigon:latest
+    container_name: benchmark_erigon
+    volumes:
+      - erigon_data:/home/erigon/.local/share/erigon
+    ports:
+      - 8545:8545
+      - 8551:8551
+      - 6060:6060
+    command:
+      - --chain=mainnet
+      - --http
+      - --http.addr=0.0.0.0
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+
+volumes:
+  nethermind_data:
+  geth_data:
+  besu_data:
+  reth_data:
+  erigon_data:
