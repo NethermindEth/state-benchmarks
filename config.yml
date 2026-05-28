@@ -1,0 +1,33 @@
+infrastructure:
+  manage: true
+  ssh_command: "" # e.g. "ssh user@host", leave empty for local execution
+  compose_paths:
+    monitoring: "docker/docker-compose.monitoring.yml"
+    clients: "docker/docker-compose.clients.yml"
+
+nodes:
+  rpc_url: "http://localhost:8545"
+  clients:
+    - "geth"
+    - "nethermind"
+  data_dirs:
+    nethermind: "/nethermind/data"
+    geth: "/root/.ethereum"
+    besu: "/opt/besu/data"
+    reth: "/root/.local/share/reth/mainnet"
+    erigon: "/home/erigon/.local/share/erigon"
+
+metrics:
+  prometheus_url: "http://localhost:9090"
+  queries:
+    cpu_percent: 'rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[5m]) * 100'
+    rss_bytes: 'container_memory_rss{name="benchmark_{client}"}'
+
+load_test:
+  addresses:
+    - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  slots:
+    - "0x0"
+    - "0x1"
+    - "0x2"
