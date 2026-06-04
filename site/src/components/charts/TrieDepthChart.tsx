@@ -5,8 +5,8 @@ interface Level { depth: number; x1: number; x5: number }
 interface Props { levels: Level[] }
 
 const SERIES = [
-  { key: 'x1', label: '1× mainnet', color: '#7dd3fc' },
-  { key: 'x5', label: '5× bloated', color: '#fbbf24' },
+  { key: 'x1', label: '1× mainnet', color: '#00b3ff' },
+  { key: 'x5', label: '5× bloated', color: '#ff9900' },
 ] as const;
 
 export default function TrieDepthChart({ levels }: Props) {
@@ -30,17 +30,17 @@ export default function TrieDepthChart({ levels }: Props) {
     svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
       .call(d3.axisBottom(x0))
       .call(g => g.selectAll('text').attr('fill', '#aab2c2').attr('font-size', 12))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
     svg.append('text').attr('x', W / 2).attr('y', H - 6).attr('text-anchor', 'middle').attr('fill', '#7a839a').attr('font-size', 11).text('trie depth (levels from root)');
 
     svg.append('g').attr('transform', `translate(${M.left},0)`)
       .call(d3.axisLeft(y).ticks(5).tickFormat(d => `${d}%`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('opacity', 0.22)
       .selectAll('line').data(y.ticks(5)).join('line')
-      .attr('x1', M.left).attr('x2', W - M.right).attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#1b2032');
+      .attr('x1', M.left).attr('x2', W - M.right).attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#001a2c');
 
     levels.forEach((d, di) => {
       const g = svg.append('g').attr('transform', `translate(${x0(`${d.depth}`)},0)`);

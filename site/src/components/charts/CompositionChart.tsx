@@ -14,8 +14,8 @@ interface Row {
 interface Props { data: Row[] }
 
 const AXES = [
-  { key: 'storGB', label: 'storage', color: '#7dd3fc' },
-  { key: 'acctGB', label: 'account', color: '#fbbf24' },
+  { key: 'storGB', label: 'storage', color: '#00b3ff' },
+  { key: 'acctGB', label: 'account', color: '#ff9900' },
   { key: 'codeGB', label: 'code', color: '#34d399' },
 ] as const;
 
@@ -40,21 +40,21 @@ export default function CompositionChart({ data }: Props) {
     svg.append('g').attr('transform', `translate(${M.left},0)`)
       .call(d3.axisLeft(y).ticks(5).tickFormat(d => `${d}%`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     // x axis
     svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
       .call(d3.axisBottom(x))
       .call(g => g.selectAll('text').attr('fill', '#aab2c2').attr('font-size', 12))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     // hatch pattern for projected bars
     const defs = svg.append('defs');
     const pat = defs.append('pattern').attr('id', 'comp-hatch')
       .attr('width', 6).attr('height', 6).attr('patternUnits', 'userSpaceOnUse')
       .attr('patternTransform', 'rotate(45)');
-    pat.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#0f1322');
-    pat.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6).attr('stroke', '#2b3247').attr('stroke-width', 4);
+    pat.append('rect').attr('width', 6).attr('height', 6).attr('fill', '#00111d');
+    pat.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 6).attr('stroke', '#13405c').attr('stroke-width', 4);
 
     data.forEach((d) => {
       const bx = x(`${d.mult}x`)!;
@@ -63,7 +63,7 @@ export default function CompositionChart({ data }: Props) {
       if (d.pending || d.totalGB == null) {
         svg.append('rect')
           .attr('x', bx).attr('y', M.top).attr('width', bw).attr('height', y(0) - M.top)
-          .attr('fill', 'none').attr('stroke', '#2b3247').attr('stroke-dasharray', '4 4');
+          .attr('fill', 'none').attr('stroke', '#13405c').attr('stroke-dasharray', '4 4');
         svg.append('text')
           .attr('x', bx + bw / 2).attr('y', (M.top + y(0)) / 2).attr('text-anchor', 'middle')
           .attr('fill', '#525c75').attr('font-size', 11).attr('font-family', 'JetBrains Mono')
@@ -99,7 +99,7 @@ export default function CompositionChart({ data }: Props) {
             .attr('x', bx + bw / 2)
             .attr('y', (yTop + yBot) / 2 + 4)
             .attr('text-anchor', 'middle')
-            .attr('fill', '#0f1322')
+            .attr('fill', '#00111d')
             .attr('font-size', 11)
             .attr('font-weight', 600)
             .attr('opacity', 0)

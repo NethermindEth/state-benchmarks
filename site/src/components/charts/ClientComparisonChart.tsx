@@ -5,8 +5,8 @@ type Row = { mult: number } & Record<string, number>;
 interface Props { data: Row[]; clients?: string[] }
 
 const COLORS: Record<string, string> = {
-  nethermind: '#7dd3fc',
-  geth: '#fbbf24',
+  nethermind: '#00b3ff',
+  geth: '#ff9900',
   besu: '#f87171',
   reth: '#34d399',
   erigon: '#c084fc',
@@ -41,18 +41,18 @@ export default function ClientComparisonChart({ data, clients: clientsProp }: Pr
     svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
       .call(d3.axisBottom(x0))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('transform', `translate(${M.left},0)`)
       .call(d3.axisLeft(y).ticks(6).tickFormat(d => `${d} ms`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('opacity', 0.25)
       .selectAll('line').data(y.ticks(6)).join('line')
       .attr('x1', M.left).attr('x2', W - M.right)
       .attr('y1', d => y(d)).attr('y2', d => y(d))
-      .attr('stroke', '#1b2032');
+      .attr('stroke', '#001a2c');
 
     const groups = svg.append('g')
       .selectAll('g')

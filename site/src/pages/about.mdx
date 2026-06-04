@@ -7,6 +7,7 @@ description: What this project is, who runs it, and where it stands.
 import Section from '../components/Section.astro';
 import Card from '../components/ui/Card.astro';
 import Stat from '../components/ui/Stat.astro';
+import Callout from '../components/ui/Callout.astro';
 
 <Section eyebrow="About" title="What this is.">
 
@@ -15,6 +16,13 @@ chain's state is many times larger than today's mainnet. We continue an existing
 "Bloatnet" — a devnet whose state was already grown to roughly 3.5× mainnet — and push it further,
 up to 10×, benchmarking the things that decide whether the network can safely raise the gas limit
 and move toward statelessness.
+
+<Callout type="note" title="About Nethermind">
+  Nethermind builds and secures core Ethereum infrastructure. We develop the Nethermind execution
+  client, contribute to network upgrades, and advance protocol work across rollups and
+  zero-knowledge systems — combining full-stack Ethereum expertise with security audits and formal
+  verification. This benchmarking effort feeds directly back into that client and protocol work.
+</Callout>
 
 ## Where it stands
 

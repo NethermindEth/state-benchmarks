@@ -75,20 +75,20 @@ export default function StateGrowthHero({ milestones }: Props) {
         <svg viewBox="-200 -200 400 400" className="w-full h-full">
           <defs>
             <radialGradient id="blob" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0%" stopColor="#7dd3fc" stopOpacity={0.95} />
-              <stop offset="60%" stopColor="#0ea5e9" stopOpacity={0.55} />
-              <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0} />
+              <stop offset="0%" stopColor="#00b3ff" stopOpacity={0.95} />
+              <stop offset="60%" stopColor="#0090d6" stopOpacity={0.55} />
+              <stop offset="100%" stopColor="#0090d6" stopOpacity={0} />
             </radialGradient>
             <radialGradient id="ring" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="80%" stopColor="#38bdf8" stopOpacity={0} />
-              <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.6} />
+              <stop offset="80%" stopColor="#4fc9ff" stopOpacity={0} />
+              <stop offset="100%" stopColor="#4fc9ff" stopOpacity={0.6} />
             </radialGradient>
           </defs>
-          <circle r={60} fill="none" stroke="#3b445a" strokeDasharray="4 4" strokeWidth={1} />
+          <circle r={60} fill="none" stroke="#13405c" strokeDasharray="4 4" strokeWidth={1} />
           <text x={0} y={-72} textAnchor="middle" fill="#7a839a" fontSize={12} fontFamily="JetBrains Mono">
             1x baseline
           </text>
-          <circle r={60 + 130} fill="none" stroke="#1b2032" strokeWidth={1} />
+          <circle r={60 + 130} fill="none" stroke="#001a2c" strokeWidth={1} />
           <text x={0} y={-(60 + 138)} textAnchor="middle" fill="#525c75" fontSize={12} fontFamily="JetBrains Mono">
             10x target
           </text>

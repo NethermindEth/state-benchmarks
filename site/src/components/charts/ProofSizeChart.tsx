@@ -29,24 +29,24 @@ export default function ProofSizeChart({ data }: Props) {
     svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
       .call(d3.axisBottom(x).ticks(8).tickFormat(d => `${d}x`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('transform', `translate(${M.left},0)`)
       .call(d3.axisLeft(y).ticks(6).tickFormat(d => `${(+d / 1024).toFixed(1)} KB`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('opacity', 0.25)
       .selectAll('line').data(y.ticks(6)).join('line')
       .attr('x1', M.left).attr('x2', W - M.right)
       .attr('y1', d => y(d)).attr('y2', d => y(d))
-      .attr('stroke', '#1b2032');
+      .attr('stroke', '#001a2c');
 
     const series: Array<{ key: keyof Row; color: string; dash: string | null; label: string }> = [
-      { key: 'accountP50', color: '#7dd3fc', dash: null,  label: 'account proof p50' },
-      { key: 'accountP95', color: '#7dd3fc', dash: '4 3', label: 'account proof p95' },
-      { key: 'storageP50', color: '#fbbf24', dash: null,  label: 'storage proof p50' },
-      { key: 'storageP95', color: '#fbbf24', dash: '4 3', label: 'storage proof p95' },
+      { key: 'accountP50', color: '#00b3ff', dash: null,  label: 'account proof p50' },
+      { key: 'accountP95', color: '#00b3ff', dash: '4 3', label: 'account proof p95' },
+      { key: 'storageP50', color: '#ff9900', dash: null,  label: 'storage proof p50' },
+      { key: 'storageP95', color: '#ff9900', dash: '4 3', label: 'storage proof p95' },
     ];
 
     series.forEach((s, i) => {

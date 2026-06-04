@@ -5,26 +5,35 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Nethermind Dark Navy (#00253D) ramp — surfaces & text on a navy-black canvas
         ink: {
-          50: '#f6f7f9',
-          100: '#eceef2',
-          200: '#d4d9e2',
-          300: '#aab2c2',
-          400: '#7a839a',
-          500: '#525c75',
-          600: '#3b445a',
-          700: '#2b3247',
-          800: '#1b2032',
-          900: '#0f1322',
-          950: '#070a16',
+          50: '#eef5fa',
+          100: '#d8e8f2',
+          200: '#a9c8db',
+          300: '#7ba6c0',
+          400: '#4d7d9c',
+          500: '#2f5d7c',
+          600: '#13405c',
+          700: '#003049',
+          800: '#00253d', // Nethermind Dark Navy
+          900: '#001a2c',
+          950: '#00111d',
         },
+        // Nethermind Blue (#00B3FF) — primary accent
         accent: {
-          400: '#7dd3fc',
-          500: '#38bdf8',
-          600: '#0ea5e9',
+          400: '#4fc9ff',
+          500: '#00b3ff',
+          600: '#0090d6',
+        },
+        // Nethermind Orange (#FF9900) — secondary accent
+        brand: {
+          navy: '#00253d',
+          blue: '#00b3ff',
+          orange: '#ff9900',
+          white: '#ffffff',
         },
         signal: {
-          warn: '#fbbf24',
+          warn: '#ff9900',
           danger: '#f87171',
           good: '#34d399',
         },
@@ -36,7 +45,7 @@ export default {
       },
       backgroundImage: {
         'hero-grid':
-          'radial-gradient(circle at 1px 1px, rgba(125,211,252,0.18) 1px, transparent 0)',
+          'radial-gradient(circle at 1px 1px, rgba(0,179,255,0.16) 1px, transparent 0)',
       },
     },
   },

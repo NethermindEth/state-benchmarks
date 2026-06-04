@@ -5,9 +5,9 @@ interface Row { mult: number; accountP50: number; accountP95: number; storageP50
 interface Props { data: Row[]; pendingMults?: number[] }
 
 const SERIES = [
-  { key: 'accountP50', label: 'account p50', color: '#7dd3fc' },
-  { key: 'accountP95', label: 'account p95', color: '#38bdf8' },
-  { key: 'storageP50', label: 'account + 1 slot p50', color: '#fbbf24' },
+  { key: 'accountP50', label: 'account p50', color: '#00b3ff' },
+  { key: 'accountP95', label: 'account p95', color: '#4fc9ff' },
+  { key: 'storageP50', label: 'account + 1 slot p50', color: '#ff9900' },
 ] as const;
 
 export default function ProofComparisonChart({ data, pendingMults = [] }: Props) {
@@ -32,23 +32,23 @@ export default function ProofComparisonChart({ data, pendingMults = [] }: Props)
     svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
       .call(d3.axisBottom(x0))
       .call(g => g.selectAll('text').attr('fill', '#aab2c2').attr('font-size', 12))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('transform', `translate(${M.left},0)`)
       .call(d3.axisLeft(y).ticks(5).tickFormat(d => `${(+d / 1024).toFixed(1)} KB`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('opacity', 0.22)
       .selectAll('line').data(y.ticks(5)).join('line')
       .attr('x1', M.left).attr('x2', W - M.right)
-      .attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#1b2032');
+      .attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#001a2c');
 
     // pending slots
     pendingMults.forEach((m) => {
       const bx = x0(`${m}x`)!;
       svg.append('rect').attr('x', bx).attr('y', M.top).attr('width', x0.bandwidth()).attr('height', y(0) - M.top)
-        .attr('fill', 'none').attr('stroke', '#2b3247').attr('stroke-dasharray', '4 4');
+        .attr('fill', 'none').attr('stroke', '#13405c').attr('stroke-dasharray', '4 4');
       svg.append('text').attr('x', bx + x0.bandwidth() / 2).attr('y', (M.top + y(0)) / 2)
         .attr('text-anchor', 'middle').attr('fill', '#525c75').attr('font-size', 11).attr('font-family', 'JetBrains Mono').text('pending');
       svg.append('text').attr('x', bx + x0.bandwidth() / 2).attr('y', H - M.bottom + 34)

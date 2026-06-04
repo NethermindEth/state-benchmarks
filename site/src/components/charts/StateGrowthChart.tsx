@@ -27,27 +27,27 @@ export default function StateGrowthChart({ data }: Props) {
     // hatch for projected
     const defs = svg.append('defs');
     const grad = defs.append('linearGradient').attr('id', 'sg-bar').attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', 1);
-    grad.append('stop').attr('offset', '0%').attr('stop-color', '#7dd3fc');
-    grad.append('stop').attr('offset', '100%').attr('stop-color', '#0ea5e9');
+    grad.append('stop').attr('offset', '0%').attr('stop-color', '#00b3ff');
+    grad.append('stop').attr('offset', '100%').attr('stop-color', '#0090d6');
     const pat = defs.append('pattern').attr('id', 'sg-hatch')
       .attr('width', 7).attr('height', 7).attr('patternUnits', 'userSpaceOnUse').attr('patternTransform', 'rotate(45)');
     pat.append('rect').attr('width', 7).attr('height', 7).attr('fill', '#13283a');
-    pat.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 7).attr('stroke', '#38bdf8').attr('stroke-width', 3).attr('opacity', 0.5);
+    pat.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', 7).attr('stroke', '#4fc9ff').attr('stroke-width', 3).attr('opacity', 0.5);
 
     svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
       .call(d3.axisBottom(x))
       .call(g => g.selectAll('text').attr('fill', '#aab2c2').attr('font-size', 12))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('transform', `translate(${M.left},0)`)
       .call(d3.axisLeft(y).ticks(5).tickFormat(d => `${(+d / 1000).toFixed(1)} TB`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#2b3247'));
+      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('opacity', 0.22)
       .selectAll('line').data(y.ticks(5)).join('line')
       .attr('x1', M.left).attr('x2', W - M.right)
-      .attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#1b2032');
+      .attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#001a2c');
 
     data.forEach((d, i) => {
       const bx = x(`${d.mult}x`)!;
@@ -58,7 +58,7 @@ export default function StateGrowthChart({ data }: Props) {
         svg.append('rect')
           .attr('x', bx).attr('y', M.top).attr('width', bw).attr('height', H - M.bottom - M.top)
           .attr('rx', 4).attr('fill', 'none')
-          .attr('stroke', '#2b3247').attr('stroke-dasharray', '4 4');
+          .attr('stroke', '#13405c').attr('stroke-dasharray', '4 4');
         svg.append('text')
           .attr('x', bx + bw / 2).attr('y', (M.top + H - M.bottom) / 2)
           .attr('text-anchor', 'middle').attr('fill', '#525c75').attr('font-size', 11)
