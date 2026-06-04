@@ -44,6 +44,26 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set sampled in every state, so the bars are directly comparable. Individual proofs barely grow — witness depth stays at 8 levels.</p>
         <ProofComparisonChart client:visible data={proofs.series} pendingMults={proofs.pendingMults} />
         <p class="mt-4 text-sm text-ink-400">{proofs.finding}</p>
+
+        <div class="mt-8 pt-6 border-t border-ink-800">
+          <div class="text-xs uppercase tracking-wider text-ink-400 mb-1">Measured vs theory</div>
+          <h4 class="font-display text-white mb-3">Account proof vs the log₁₆ law &nbsp;p(n) = c₀ + c₁·log₁₆(n)</h4>
+          <ModelFitChart
+            client:visible
+            model={{ kind: 'log16', c0: 3820, c1: 441, xRef: 381 }}
+            points={[
+              { x: 381, y: 3820, measured: true, label: '1×' },
+              { x: 392, y: 3822, measured: true, label: '3.5×' },
+              { x: 1993, y: 4083, measured: true, label: '5×' },
+            ]}
+            xDomain={[350, 2100]}
+            xLabel="account count (millions)"
+            yLabel="account proof p50 (bytes)"
+            xFmt="millions"
+            yFmt="kb"
+          />
+          <p class="mt-4 text-sm text-ink-400">The orange line is the formula's prediction; the blue dots are measured. Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why the 3.5× state (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher.</p>
+        </div>
       </Card>
 
       <Card title="Cross-client comparison">
@@ -57,47 +77,6 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
           <p class="mt-1">{proofs.crossClient}</p>
         </div>
         <Placeholder title="Execution-time & sync benchmarks not collected yet" note={clients.note} />
-      </Card>
-    </div>
-
-    <!-- measured vs theory -->
-    <h3 id="measured-vs-theory" class="font-display text-2xl text-white mt-16 mb-2 scroll-mt-24">Measured vs theory</h3>
-    <p class="text-ink-300 max-w-2xl mb-8">The orange line is what the formula predicts; the blue dots are what we actually measured. Where they coincide, the model holds — and where a point sits off the curve, it tells us something real.</p>
-    <div class="grid grid-cols-1 gap-12">
-      <Card title="Total size vs the linear law  T(m) = 221.4·m">
-        <ModelFitChart
-          client:visible
-          model={{ kind: 'linear', a: 0, b: 221.4 }}
-          points={[
-            { x: 1, y: 221.4, measured: true, label: '1×' },
-            { x: 3.47, y: 768, measured: true, label: '3.5×' },
-            { x: 5.01, y: 1109.6, measured: true, label: '5×' },
-          ]}
-          xDomain={[1, 10]}
-          xLabel="state multiplier (× mainnet)"
-          yLabel="total trie size"
-          xFmt="mult"
-          yFmt="tb"
-        />
-        <p class="mt-4 text-sm text-ink-400">Every milestone is rebloated to the same composition, so total size is just mainnet × multiplier. The three measured points land on the line; the curve continues to the 10× target.</p>
-      </Card>
-
-      <Card title="Account proof vs the log₁₆ law  p(n) = c₀ + c₁·log₁₆(n)">
-        <ModelFitChart
-          client:visible
-          model={{ kind: 'log16', c0: 3820, c1: 441, xRef: 381 }}
-          points={[
-            { x: 381, y: 3820, measured: true, label: '1×' },
-            { x: 392, y: 3822, measured: true, label: '3.5×' },
-            { x: 1993, y: 4083, measured: true, label: '5×' },
-          ]}
-          xDomain={[350, 2100]}
-          xLabel="account count (millions)"
-          yLabel="account proof p50 (bytes)"
-          xFmt="millions"
-          yFmt="kb"
-        />
-        <p class="mt-4 text-sm text-ink-400">Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why the 3.5× state (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher.</p>
       </Card>
     </div>
 
