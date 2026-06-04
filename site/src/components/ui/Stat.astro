@@ -1,0 +1,20 @@
+---
+interface Props {
+  value: string;
+  label: string;
+  sub?: string;
+  measured?: boolean;
+}
+const { value, label, sub, measured = false } = Astro.props;
+---
+<div class="relative rounded-2xl border border-ink-800 bg-ink-900/50 p-5 overflow-hidden">
+  <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent-500/50 to-transparent"></div>
+  <div class="flex items-baseline justify-between gap-2">
+    <div class="text-xs uppercase tracking-wider text-ink-400">{label}</div>
+    {measured
+      ? <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-signal-good/15 text-signal-good">measured</span>
+      : <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">projected</span>}
+  </div>
+  <div class="mt-2 font-display text-3xl text-white tabular-nums">{value}</div>
+  {sub && <div class="mt-1 text-sm text-ink-400">{sub}</div>}
+</div>

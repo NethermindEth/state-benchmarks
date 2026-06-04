@@ -1,0 +1,204 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Section from '../components/Section.astro';
+import Card from '../components/ui/Card.astro';
+import Callout from '../components/ui/Callout.astro';
+---
+<BaseLayout title="Docs" description="How to run the bloating rig: the StateDiffsWriter Nethermind plugin, the Go orchestrator, the sidecar tracker, and cross-EL replay.">
+  <div class="mx-auto max-w-3xl px-6 py-12 prose-site">
+    <div class="text-xs uppercase tracking-[0.18em] text-accent-400 mb-3">Docs</div>
+    <h1>Running the rig</h1>
+    <p>
+      The bloating stack is two pieces of software, shipped as the two PRs below. This page is the
+      operator's guide: enable the plugin, build the Go binaries, run the loop, and replay the
+      result on any EL client.
+    </p>
+
+    <div class="grid md:grid-cols-2 gap-4 not-prose my-8">
+      <Card title="① Nethermind plugin">
+        <p class="text-sm text-ink-300 mb-2"><code>StateDiffsWriter</code> — writes per-block trie diffs to a <code>BlockDiffs</code> column family.</p>
+        <a href="https://github.com/NethermindEth/nethermind/pull/11788" target="_blank" rel="noreferrer noopener" class="text-accent-400 text-sm">nethermind#11788 →</a>
+      </Card>
+      <Card title="② Go orchestrator + sidecar">
+        <p class="text-sm text-ink-300 mb-2">Closed-loop bloating driver, the RocksDB-secondary tracker, and cross-EL replay.</p>
+        <a href="https://github.com/NethermindEth/eth-perf-research/pull/77" target="_blank" rel="noreferrer noopener" class="text-accent-400 text-sm">eth-perf-research#77 →</a>
+      </Card>
+    </div>
+
+    <hr />
+
+    <h2>1 · Nethermind StateDiffsWriter plugin</h2>
+    <p>
+      The plugin is the only Nethermind-side change. On every committed block it walks the trie
+      diff and appends one RLP record to a dedicated <code>BlockDiffs</code> RocksDB column family.
+      It keeps <strong>no</strong> in-process tracker state — the sidecar reads that CF and does all
+      the accounting.
+    </p>
+
+    <h3>Configuration</h3>
+    <p>Config section <code>StateDiffsWriter</code> (disabled by default):</p>
+
+    <table>
+      <thead><tr><th>Key</th><th>Default</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>Enabled</code></td><td><code>false</code></td><td>Turn the per-block diff writer on.</td></tr>
+        <tr><td><code>KeepLastNBlocks</code></td><td><code>1000000</code></td><td>How many recent blocks of diffs to retain in the CF. Lower for tight disk budgets; must exceed the sidecar's worst-case catch-up window.</td></tr>
+        <tr><td><code>PruneIntervalSeconds</code></td><td><code>600</code></td><td>Background pruner sweep interval. <code>0</code> or negative disables pruning.</td></tr>
+      </tbody>
+    </table>
+
+    <p>Enable via any of Nethermind's standard config surfaces:</p>
+    <pre><code>{`# configuration JSON
+{ "StateDiffsWriter": { "Enabled": true, "KeepLastNBlocks": 1000000 } }
+
+# environment variables
+NETHERMIND_STATEDIFFSWRITERCONFIG_ENABLED=true
+NETHERMIND_STATEDIFFSWRITERCONFIG_KEEPLASTNBLOCKS=1000000
+
+# CLI
+--StateDiffsWriter.Enabled true`}</code></pre>
+
+    <Callout type="note" title="The statecomp_* JSON-RPC moved">
+      The old in-engine <code>StateComposition</code> plugin exposed <code>statecomp_get</code> /
+      <code>statecomp_lite</code> on the node. Those are <strong>gone from Nethermind</strong> — the
+      same endpoints now live on the sidecar (port <code>:9001</code>), same JSON shape.
+    </Callout>
+
+    <h3>BlockDiffs wire format</h3>
+    <p>Each value is a strict-additive RLP list, keyed by 8-byte big-endian block number:</p>
+    <pre><code>{`[ blockNumber, postStateRoot, codeHashChanges[], slotCountChanges[],
+  accountTrieBytesDelta?, storageTrieBytesDelta?, accountsAddedDelta? ]`}</code></pre>
+    <p>Trailing fields can be added without breaking older readers; the sidecar's decoder tolerates the non-canonical <code>long</code> encodings C# RLP emits.</p>
+
+    <hr />
+
+    <h2>2 · Go orchestrator &amp; sidecar</h2>
+    <p>Two co-located binaries in <code>orchestrator/</code> of eth-perf-research.</p>
+
+    <h3>Build</h3>
+    <pre><code>{`# orchestrator (the bloating driver)
+make build                  # -> bin/orchestrator
+make linux                  # static linux/amd64
+
+# sidecar (the state-composition tracker)
+make build-sidecar-cgo      # full grocksdb; needs librocksdb-dev
+make docker-sidecar         # debian-slim image with librocksdb9
+make build-sidecar          # stub backend (no CGO) for tests on macOS
+
+make all                    # both`}</code></pre>
+
+    <h3>Run the bloater</h3>
+    <p>
+      <code>orchestrator run</code> is the closed-loop controller. It commits blocks into Nethermind
+      via <code>testing_commitBlockV1</code>, packing transaction "verbs" until the live state
+      composition (read from the sidecar) reaches the target in <code>target.yaml</code>.
+    </p>
+    <pre><code>{`ORCH_DEPLOY_PRIVATE_KEY=0x... \\
+bin/orchestrator run \\
+  --rpc-url        http://nethermind:8545 \\
+  --state-dir      /var/orch/state \\
+  --target-yaml    /etc/orch/target.yaml \\
+  --genesis-sha256 <hex>`}</code></pre>
+    <p>Narrow the active verb set with <code>ORCH_VERBS</code> (comma-separated):</p>
+    <pre><code>{`ORCH_VERBS=eoatx,storagespam,uniswap_swaps bin/orchestrator run ...`}</code></pre>
+    <p>
+      Available verbs: <code>eoatx</code>, <code>calltx</code>, <code>deploytx</code>,
+      <code>factorydeploytx</code>, <code>storagespam</code>, <code>erc20_bloater</code>,
+      <code>erc20tx</code>, <code>uniswap_swaps</code>, <code>gasburnertx</code>,
+      <code>storagerefundtx</code>.
+    </p>
+
+    <h3>Run the sidecar</h3>
+    <p>One binary, four modes. Production runs <code>--mode=all</code> beside Nethermind, sharing its FlatDb in RocksDB secondary mode:</p>
+    <pre><code>{`bin/sidecar \\
+  --mode=all \\
+  --db          /mnt/nm/flat \\
+  --code-db     /mnt/nm/code \\
+  --snapshot-dir /var/lib/sidecar \\
+  --dedup-dir   /mnt/scratch/codehash-dedup   # roomy: ~700 GB at 10x`}</code></pre>
+
+    <table>
+      <thead><tr><th>Mode</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>bootstrap</code></td><td>One-shot full FlatDb scan → <code>snapshot.bin</code>, exit.</td></tr>
+        <tr><td><code>tail</code></td><td>Restore last snapshot, apply <code>BlockDiffs</code>, re-snapshot periodically.</td></tr>
+        <tr><td><code>serve</code></td><td>Read-only JSON-RPC over an existing snapshot.</td></tr>
+        <tr><td><code>all</code></td><td>Bootstrap-if-needed + tail + serve. Production default.</td></tr>
+      </tbody>
+    </table>
+
+    <p>JSON-RPC on <code>:9001</code>:</p>
+    <table>
+      <thead><tr><th>Method</th><th>Returns</th></tr></thead>
+      <tbody>
+        <tr><td><code>statecomp_lite</code></td><td>Tier-1 counters + lag — the controller's signal.</td></tr>
+        <tr><td><code>statecomp_get</code></td><td>Full report: tier-2 byte/depth counters + slot histogram.</td></tr>
+        <tr><td><code>statecomp_health</code></td><td>Liveness: lag, snapshot age, RSS.</td></tr>
+      </tbody>
+    </table>
+    <pre><code>{`curl -s localhost:9001 -H content-type:application/json \\
+  --data '{"jsonrpc":"2.0","id":1,"method":"statecomp_get"}' | jq .result`}</code></pre>
+
+    <hr />
+
+    <h2>3 · Cross-EL replay</h2>
+    <p>
+      Each <code>run</code> emits replay artifacts so the exact state can be reproduced on any
+      Engine-API client and checked bit-for-bit.
+    </p>
+    <table>
+      <thead><tr><th>Artifact</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>payloads.rlp</code></td><td>4-byte-LE length-prefixed <code>ExecutionPayloadV3</code> frames — the committed block stream.</td></tr>
+        <tr><td><code>journal.bin</code></td><td>Protobuf binlog + BLAKE3 chain hash — per-batch controller state, idempotent restart.</td></tr>
+        <tr><td><code>run-manifest.json</code></td><td><code>genesis_sha256</code>, <code>chain_identity_hash</code>, <code>target_history</code>, <code>final_state_root</code>.</td></tr>
+        <tr><td><code>pending-batch.bin.&lt;id&gt;</code></td><td>Crash-recovery snapshot of the in-flight batch.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Replay onto another client</h3>
+    <pre><code>{`# 1. boot the target EL on the matching genesis (verify genesis_sha256), JWT on Engine API
+
+# 2. heal block-number gaps from partial-acceptance skips
+heal-payloads heal \\
+  --in  payloads.rlp --out payloads.healed.rlp \\
+  --nm-rpc <source-NM-engine-api> --jwt-path jwt.hex --include-tail
+
+# 3. replay + verify the final state root
+bin/orchestrator replay \\
+  --payloads payloads.healed.rlp \\
+  --manifest run-manifest.json \\
+  --rpc-url  http://<target-el>:8551 \\
+  --jwt-path jwt.hex`}</code></pre>
+
+    <p>Replay drives <code>engine_newPayloadV4</code> + <code>engine_forkchoiceUpdatedV3</code>. Outcomes:</p>
+    <ul>
+      <li><code>ErrReplayInvalid</code> — a payload was rejected (<code>status != VALID</code>).</li>
+      <li><code>ErrReplayMismatch</code> — all blocks accepted, but final <code>stateRoot</code> ≠ manifest.</li>
+      <li><em>nil</em> — bit-exact replay verified.</li>
+    </ul>
+
+    <h3>Audit a journal</h3>
+    <pre><code>{`bin/orchestrator verify-journal --path journal.bin
+# re-derives the BLAKE3 chain hash, prints final hash + record count`}</code></pre>
+
+    <hr />
+
+    <h2>End-to-end</h2>
+    <Callout type="goal" title="Bloat → measure → replay">
+      <ol class="list-decimal pl-5 space-y-1">
+        <li>Run Nethermind with <code>StateDiffsWriter.Enabled=true</code>.</li>
+        <li>Start the <code>sidecar --mode=all</code> against its FlatDb.</li>
+        <li>Run <code>orchestrator run</code> with a <code>target.yaml</code> — it bloats until the sidecar reports the target composition.</li>
+        <li>Collect <code>payloads.rlp</code> + <code>run-manifest.json</code> from the state dir.</li>
+        <li><code>heal-payloads</code> then <code>orchestrator replay</code> onto Geth / Besu / Reth / Erigon to reproduce and verify the state.</li>
+      </ol>
+    </Callout>
+
+    <p class="text-sm text-ink-400">
+      Full design rationale: <code>orchestrator/docs/v19-sidecar-architecture.md</code> in eth-perf-research#77.
+      Both PRs are draft at time of writing; flags and defaults track the branches
+      <code>replace-statecomp-with-statediffswriter</code> and <code>feature/bloating-orchestrator</code>.
+    </p>
+  </div>
+</BaseLayout>

@@ -1,0 +1,23 @@
+---
+interface Props {
+  type?: 'goal' | 'problem' | 'solution' | 'math' | 'note';
+  title?: string;
+}
+const { type = 'note', title } = Astro.props;
+
+const styles: Record<string, { border: string; bg: string; ring: string; label: string; emoji: string }> = {
+  goal:     { border: 'border-accent-500/50',  bg: 'bg-accent-500/5',   ring: 'text-accent-400',  label: 'Goal',     emoji: '◎' },
+  problem:  { border: 'border-signal-danger/50',bg: 'bg-signal-danger/5',ring: 'text-signal-danger',label: 'Problem',  emoji: '⚠' },
+  solution: { border: 'border-signal-good/50', bg: 'bg-signal-good/5',  ring: 'text-signal-good', label: 'Solution', emoji: '✓' },
+  math:     { border: 'border-ink-700',        bg: 'bg-ink-900/80',     ring: 'text-ink-300',     label: 'Math',     emoji: '∑' },
+  note:     { border: 'border-ink-800',        bg: 'bg-ink-900/40',     ring: 'text-ink-300',     label: 'Note',     emoji: '·' },
+};
+const s = styles[type];
+---
+<aside class:list={['my-6 rounded-xl border p-5 not-prose', s.border, s.bg]}>
+  <div class:list={['flex items-center gap-2 text-xs uppercase tracking-widest mb-2', s.ring]}>
+    <span aria-hidden="true">{s.emoji}</span>
+    <span>{title ?? s.label}</span>
+  </div>
+  <div class="text-ink-200 leading-relaxed"><slot /></div>
+</aside>

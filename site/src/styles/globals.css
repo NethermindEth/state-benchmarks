@@ -1,0 +1,47 @@
+@import 'katex/dist/katex.min.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-950 text-ink-100 font-sans antialiased selection:bg-accent-500/30;
+}
+
+h1, h2, h3, h4 {
+  @apply font-display tracking-tight;
+}
+
+.prose-site {
+  @apply max-w-3xl text-ink-200 leading-relaxed;
+}
+.prose-site h1 { @apply text-4xl text-white mt-0 mb-6; }
+.prose-site h2 { @apply text-2xl text-white mt-12 mb-4 border-b border-ink-800 pb-2; }
+.prose-site h3 { @apply text-xl text-white mt-8 mb-3; }
+.prose-site p  { @apply my-4; }
+.prose-site a  { @apply text-accent-400 underline decoration-accent-500/40 underline-offset-4 hover:decoration-accent-400; }
+.prose-site code:not(pre code) {
+  @apply px-1.5 py-0.5 rounded bg-ink-800 text-accent-400 text-[0.9em] font-mono;
+}
+.prose-site pre {
+  @apply rounded-xl border border-ink-800 bg-ink-900/80 p-4 overflow-x-auto text-sm;
+}
+.prose-site ul { @apply list-disc pl-6 my-4; }
+.prose-site ol { @apply list-decimal pl-6 my-4; }
+.prose-site blockquote {
+  @apply border-l-2 border-accent-500/60 pl-4 italic text-ink-300 my-6;
+}
+.prose-site table { @apply w-full text-sm my-6 border-collapse; }
+.prose-site th, .prose-site td {
+  @apply border border-ink-800 px-3 py-2 text-left;
+}
+.prose-site th { @apply bg-ink-900 text-white; }
+.katex-display { @apply my-6 overflow-x-auto overflow-y-hidden; }

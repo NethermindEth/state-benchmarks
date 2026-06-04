@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const dest = `${base}/design/overview`;
+---
+<BaseLayout title="Design">
+  <meta http-equiv="refresh" content={`0; url=${dest}`} slot="head" />
+  <div class="mx-auto max-w-3xl px-6 py-24 text-center">
+    <p class="text-ink-300">Redirecting to <a class="text-accent-400 underline" href={dest}>the design overview</a>.</p>
+  </div>
+  <script is:inline define:vars={{ dest }}>
+    window.location.replace(dest);
+  </script>
+</BaseLayout>

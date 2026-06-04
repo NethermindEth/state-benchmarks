@@ -1,0 +1,97 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Section from '../components/Section.astro';
+import Card from '../components/ui/Card.astro';
+import Stat from '../components/ui/Stat.astro';
+import Placeholder from '../components/ui/Placeholder.astro';
+import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
+import CompositionChart from '../components/charts/CompositionChart.tsx';
+import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx';
+import growth from '../data/state-growth.json';
+import proofs from '../data/proof-sizes.json';
+import clients from '../data/client-comparison.json';
+
+const m1 = growth.milestones.find((m) => m.mult === 1)!;
+const m5 = growth.milestones.find((m) => m.mult === 5)!;
+const fmtTB = (gb: number) => (gb >= 1000 ? `${(gb / 1000).toFixed(2)} TB` : `${Math.round(gb)} GB`);
+const share = (part: number, total: number) => `${((part / total) * 100).toFixed(0)}%`;
+---
+<BaseLayout title="Results" description="Measured state-growth and composition data across milestones, with EL benchmarks pending.">
+  <Section
+    eyebrow="Results"
+    title="What we've measured."
+    intro="Three milestones carry exact full-scan data — mainnet (1×, our reference), the inherited 3.5× Bloatnet starting state, and the 5× state we grew it to. 7× and 10× are shown as empty slots until generated. No projected numbers."
+  >
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <Stat measured value={fmtTB(m5.totalGB)} label="State at 5×" sub={`${(m5.totalGB / m1.totalGB).toFixed(2)}× mainnet`} />
+      <Stat measured value={`${(m5.accounts / 1000).toFixed(2)}B`} label="Accounts at 5×" sub={`${m1.accounts}M at mainnet`} />
+      <Stat measured value={`${(m5.storage / 1000).toFixed(2)}B`} label="Storage slots at 5×" sub={`${(m1.storage / 1000).toFixed(2)}B at mainnet`} />
+      <Stat measured value={`${share(m5.storGB, m5.totalGB)}/${share(m5.acctGB, m5.totalGB)}/${share(m5.codeGB, m5.totalGB)}`} label="storage / acct / code" sub="composition ≈ mainnet" />
+    </div>
+
+    <div class="mt-12 grid grid-cols-1 gap-12">
+      <Card title="Composition: correcting the inherited state">
+        <p class="text-sm text-ink-400 mb-4">The inherited 3.5× Bloatnet state was storage-skewed (87% storage vs mainnet's 67%). As we grew it to 5× we steered it back to mainnet's true split — so 1× and 5× match, and 3.5× visibly doesn't. Holding this ratio is what keeps milestones comparable.</p>
+        <CompositionChart client:visible data={growth.milestones} />
+      </Card>
+
+      <Card title="Total state size">
+        <StateGrowthChart client:visible data={growth.milestones} />
+      </Card>
+
+      <Card title="eth_getProof witness size">
+        <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set sampled in every state, so the bars are directly comparable. Individual proofs barely grow — witness depth stays at 8 levels.</p>
+        <ProofComparisonChart client:visible data={proofs.series} pendingMults={proofs.pendingMults} />
+        <p class="mt-4 text-sm text-ink-400">{proofs.finding}</p>
+      </Card>
+
+      <Card title="Cross-client comparison">
+        <div class="flex flex-wrap gap-2 mb-5">
+          {clients.clients.map((c) => (
+            <span class="rounded-full border border-ink-700 px-3 py-1 text-sm font-mono text-ink-300">{c}</span>
+          ))}
+        </div>
+        <div class="rounded-xl border border-signal-good/30 bg-signal-good/5 p-4 mb-5 text-sm text-ink-200">
+          <span class="font-mono text-signal-good text-xs uppercase tracking-wider">verified</span>
+          <p class="mt-1">{proofs.crossClient}</p>
+        </div>
+        <Placeholder title="Execution-time & sync benchmarks not collected yet" note={clients.note} />
+      </Card>
+    </div>
+
+    <h3 class="font-display text-2xl text-white mt-16 mb-4">Milestone comparison</h3>
+    <div class="overflow-x-auto rounded-2xl border border-ink-800">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-ink-900 text-ink-300 text-left">
+            <th class="px-4 py-3 font-medium">Milestone</th>
+            <th class="px-4 py-3 font-medium text-right">Total</th>
+            <th class="px-4 py-3 font-medium text-right">Accounts</th>
+            <th class="px-4 py-3 font-medium text-right">Storage slots</th>
+            <th class="px-4 py-3 font-medium text-right">Code</th>
+            <th class="px-4 py-3 font-medium text-right">Acct depth</th>
+            <th class="px-4 py-3 font-medium">Source</th>
+          </tr>
+        </thead>
+        <tbody class="text-ink-200">
+          {growth.milestones.map((m) => (
+            <tr class="border-t border-ink-800 hover:bg-ink-900/40">
+              <td class="px-4 py-3 font-mono text-white">{m.mult}×</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.totalGB != null ? fmtTB(m.totalGB) : '—'}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.accounts != null ? (m.accounts >= 1000 ? `${(m.accounts / 1000).toFixed(2)}B` : `${m.accounts}M`) : '—'}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.storage != null ? (m.storage >= 1000 ? `${(m.storage / 1000).toFixed(2)}B` : `${m.storage}M`) : '—'}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.codeGB != null ? `${Math.round(m.codeGB)} GB` : '—'}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.accountDepth ?? '—'}</td>
+              <td class="px-4 py-3">
+                {m.measured
+                  ? <span class="text-xs font-mono px-2 py-0.5 rounded bg-signal-good/15 text-signal-good">measured</span>
+                  : <span class="text-xs font-mono px-2 py-0.5 rounded bg-ink-800 text-ink-400">pending</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-sm text-ink-400">{growth.note}</p>
+  </Section>
+</BaseLayout>

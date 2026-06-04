@@ -1,0 +1,112 @@
+---
+title: Feedback loop
+description: The closed-loop controller that steers state composition toward a mainnet shape, and the artifacts that make every run replayable.
+order: 4
+---
+
+import Callout from '../../components/ui/Callout.astro';
+
+# Feedback loop
+
+Bloating naïvely — spam one transaction type until the state is big enough — produces a state
+with the wrong *shape*. The whole point of the project is comparing apples to apples across
+multipliers, so the synthetic state has to keep mainnet's composition (≈27 % account /
+67 % storage / 6 % code) as it grows. That's a control problem.
+
+## The loop
+
+The Go orchestrator runs a strictly sequential, sensor-paced loop:
+
+```
+┌────────────┐   plan (verb mix)   ┌──────────────┐   payload   ┌────────────┐
+│ controller │ ──────────────────► │ facade/verbs │ ──────────► │ Nethermind │
+└────────────┘                     └──────────────┘  Engine API └────────────┘
+      ▲                                                                │
+      │   composition mₖ        ┌─────────┐   BlockDiffs CF            │
+      └─────────────────────────│ sidecar │ ◄──────────────────────────┘
+                                └─────────┘   (RocksDB secondary)
+```
+
+1. The **sidecar** reports the current composition vector $m_k$ (account / storage / code bytes).
+2. The **controller** computes the residual against the target $M^\star$ and picks a verb mix.
+3. The **facade** turns the plan into signed transactions; the block is submitted via Engine API.
+4. After commit, the loop repeats — paced by the sensor, never running ahead of measured state.
+
+## How the controller picks verbs
+
+Each verb has an **effect** on the composition axes. Stack those into a matrix
+$F$ (verb → axis-byte effect). Given the residual $r_k = M^\star - m_k$, the controller solves a
+projected-gradient step for the verb weights $w$ that best reduce the residual:
+
+$$
+w_k = \Pi_{\Delta}\!\left(F^\top r_k\right),
+$$
+
+where $\Pi_{\Delta}$ projects onto the simplex (weights non-negative, sum to one). $F$ is seeded
+from a `REFERENCE_F` calibration and **learned online** as observed deltas come back from the
+sidecar.
+
+<Callout type="math" title="Ratio-priority scoring, not absolute size">
+  The objective targets the *composition ratio*, not raw bytes. An axis that is proportionally
+  furthest below target gets priority — which is why the controller naturally shifts from
+  account-heavy verbs early to storage-heavy verbs as the account axis fills in.
+</Callout>
+
+## Two stabilizers (learned the hard way)
+
+<Callout type="problem" title="Controller fixation">
+  An early version locked onto `calltx` — once that verb dominated the score, its own effect kept
+  it on top and `eoatx` was never picked again. The composition skewed and never recovered.
+</Callout>
+
+<Callout type="solution" title="R1 entropy floor + R2 per-axis anti-windup">
+  **R1** keeps a minimum entropy in the verb distribution — no single verb can starve the others.
+  **R2** is per-axis anti-windup: once an axis is at or over target, its residual term is clipped
+  so the controller stops over-serving an axis it has already satisfied. Together they keep the
+  verb mix diverse and convergent. ε-greedy exploration adds occasional off-policy verbs to keep
+  the online $F$ estimate honest.
+</Callout>
+
+## Replay artifacts
+
+Every run is reproducible by construction — three files capture it:
+
+| File | Format | Purpose |
+|---|---|---|
+| `payloads.rlp` | 4-byte-LE length-prefixed RLP `ExecutionPayloadV3` frames | The committed block stream. Replayable on any EL. |
+| `journal.bin` | protobuf records + BLAKE3 chain hash | Per-batch controller state, residuals, plan, observation. Idempotent restart. |
+| `run-manifest.json` | JSON | `genesis_sha256`, `chain_identity_hash`, `target_history`, `final_state_root`. |
+
+A `pending-batch.bin.<id>` gob captures the in-flight batch for crash recovery, so a killed run
+resumes without re-sending or skipping a block.
+
+## Cross-EL replay
+
+Anyone with `payloads.rlp` + `run-manifest.json` + `genesis.json` can reproduce the state on a
+different client:
+
+```bash
+# 1. heal block-number gaps left by partial-acceptance skips
+heal-payloads heal --in payloads.rlp --out payloads.healed.rlp \
+  --nm-rpc <source-NM> --jwt-path jwt.hex --include-tail
+
+# 2. replay against the target EL and verify the final state root
+orchestrator replay --payloads payloads.healed.rlp \
+  --manifest run-manifest.json --rpc-url http://<target-el>:8551 --jwt-path jwt.hex
+```
+
+Outcomes are explicit: `ErrReplayInvalid` (a payload was rejected), `ErrReplayMismatch` (all
+blocks accepted but final `stateRoot` ≠ manifest), or success (bit-exact replay verified).
+
+<Callout type="note" title="Status">
+  Cross-client bit-exact replay (Nethermind → Geth) was validated 2026-04-29 against the Python
+  prototype. The Go replay path currently has unit-test coverage; the first end-to-end Geth
+  replay of a Go-produced `payloads.rlp` will double as its validation run.
+</Callout>
+
+## Sensor lag
+
+The sidecar tracks chain head with ~0 blocks behind under load, but on an idle chain the
+composition read can trail head by ~30 blocks (a known RocksDB-secondary visibility artifact, not
+a throughput bug). Headline measurements are therefore taken *after* the bloater stops and the
+sidecar has caught up, the same hygiene rule snap-sync benchmarking uses.

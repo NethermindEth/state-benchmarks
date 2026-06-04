@@ -1,0 +1,73 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Goals
+description: How state-benchmarks aligns with the Ethereum Foundation's 2026 priorities.
+---
+
+import Section from '../components/Section.astro';
+import Card from '../components/ui/Card.astro';
+import Callout from '../components/ui/Callout.astro';
+
+<Section eyebrow="Goals" title="What this project is for." intro="Three EF tracks, two upcoming forks, one operational question: do clients hold at 10× mainnet?">
+
+The headline numbers we anchor against: **mainnet is 381M accounts, 75.9M contracts, 1.56B storage slots, 13.4 GB of code, 221 GB of trie data** as of block 24,927,663 (2026-05-05).
+
+Mainnet sampled proof sizes at the same head: **account proof p50 = 3,821 B / p95 = 3,929 B; storage proof p50 = 1,211 B / p95 = 2,371 B**. These are the lines the bloated multipliers are measured against.
+
+## Track 1 — Scale
+
+The Glamsterdam fork (H1 2026) carries a gas-limit increase. The community is converging on
+**100M+ gas per block** but the supporting evidence is patchy: most published benchmarks
+stop at mainnet size, where the trie is still warm in OS page cache.
+
+<Callout type="goal" title="Deliverable 1.A">
+  The full benchmark battery — sync, execution-under-head, and JSON-RPC latency — run on
+  **Nethermind, Geth, Besu, Reth, and Erigon** at each milestone (1× / 3.5× / 5× / 7× / 10×).
+  Spec'd in [issue #21](https://github.com/NethermindEth/state-benchmarks/issues/21); a metric
+  degrading >25 % vs the previous milestone is flagged as a regression. Output committed to
+  `benchmarks/<milestone>/` as `{client, state_size, metric, p50, p95, p99, mean}`.
+</Callout>
+
+<Callout type="goal" title="Deliverable 1.B">
+  A snap-sync resilience report: time-to-tip, bandwidth, peak memory, peak disk I/O at 5× ([#16](https://github.com/NethermindEth/state-benchmarks/issues/16)), 7× ([#17](https://github.com/NethermindEth/state-benchmarks/issues/17)), and 10× ([#18](https://github.com/NethermindEth/state-benchmarks/issues/18)). This is the load-bearing answer to "can a fresh node still catch up?"
+</Callout>
+
+## Track 2 — Harden L1
+
+The Hegotá fork (H2 2026) is the statelessness inflection point. Verkle (or its successor)
+will be argued against an *MPT counterfactual*. That counterfactual does not currently exist
+as numbers — only as folklore.
+
+<Callout type="goal" title="Deliverable 2.A">
+  `eth_getProof` size distributions (p50 / p95) across milestones, broken down by account vs. storage proofs. Only the mainnet (1×) baseline is sampled so far; each new milestone adds one row once its state is scanned.
+</Callout>
+
+<Callout type="goal" title="Deliverable 2.B">
+  A trie-structure inventory: branch / extension / leaf counts, average path length, branch occupancy. Mainnet inventory shipped 2026-05-05 (avg account depth **7.61** nibbles, avg storage depth **4.84**, avg branch occupancy **3.70 / 16**); the bloated states are evaluated against those targets.
+</Callout>
+
+## Track 3 — CROPS
+
+The Ethereum Foundation's
+[Crypto, Open source, Recursion, Privacy, Security](https://blog.ethereum.org/2024/04/26/inevitability)
+framing is not a checkbox — it is a license to refuse work that doesn't fit.
+
+<div class="grid md:grid-cols-3 gap-4 not-prose my-6">
+  <Card title="Open source">
+    Every script, payload, snapshot, and analysis is published. Reproducibility is a feature, not a side effect.
+  </Card>
+  <Card title="Security">
+    Identifying where clients degrade is identifying where attackers will probe first. The bench doubles as a stress test.
+  </Card>
+  <Card title="Censorship resistance">
+    Validator performance degradation is censorship; if state growth quietly slows block production it changes who can include transactions.
+  </Card>
+</div>
+
+## What this project is *not*
+
+- It is not a benchmark contest. We don't crown a winner; we publish the curves.
+- It is not a Verkle endorsement or rejection. We produce the MPT baseline; the comparison happens elsewhere.
+- It is not a one-shot study. The infrastructure is meant to be re-run every fork.
+
+</Section>

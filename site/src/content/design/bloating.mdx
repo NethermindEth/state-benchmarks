@@ -1,0 +1,70 @@
+---
+title: Bloating methods
+description: Why the project drives state growth through the Engine API with a closed-loop verb controller, not direct DB injection.
+order: 2
+---
+
+import Callout from '../../components/ui/Callout.astro';
+
+# Bloating methods
+
+To inflate state from a ~3.5× starting point toward 10×, *something* has to write a great many
+leaves into the MPT. There are two honest ways to do it, and the project deliberately chose the
+slower one.
+
+## Path A — direct DB injection
+
+Skip the EVM. Construct accounts and slots in memory, hash them into a trie, and commit nodes
+straight to the client's snapshot DB.
+
+<Callout type="solution" title="Pros">
+  - **Fast.** State assembled in hours, not weeks.
+  - **Distribution-controllable.** Pick the slot-per-contract shape directly.
+</Callout>
+
+<Callout type="problem" title="Cons">
+  - **Consensus-illegal.** No block history; can't replay or snap-sync the result without a custom genesis dance.
+  - **Client-specific.** Each EL has its own snapshot layout.
+  - **Unrealistic.** Bytes never went through the EVM or the state-transition function, so execution and flush behaviour don't match a real chain.
+</Callout>
+
+## Path B — commit through the node, replay via Engine API (chosen)
+
+Build blocks full of state-mutating transactions and commit them into Nethermind through
+`testing_commitBlockV1`. Every committed block is real — it went through the EVM, the STF, and
+the snapshot-flush path — and it's reachable by full validation, so snap sync works against the
+result. Each block is also saved to `payloads.rlp`, which **replays on any client** through
+`engine_newPayloadV4` + `engine_forkchoiceUpdatedV3`.
+
+<Callout type="goal" title="A Go closed-loop controller drives the growth">
+  The orchestrator doesn't blindly spam transactions. It runs a feedback controller that steers
+  the *composition* of the growing state toward a mainnet shape (the measured 27 % account /
+  67 % storage / 6 % code split), choosing which kind of transaction to send next based on which
+  axis is currently underweight. Details on the [feedback-loop page](/state-benchmarks/design/orchestrator).
+</Callout>
+
+## Bloating verbs
+
+The controller's actions are a fixed set of **verbs**, each touching a different state axis:
+
+| Verb | Primary effect |
+|---|---|
+| `eoatx` | new externally-owned accounts (account-trie growth) |
+| `calltx` | calls into existing contracts (storage churn) |
+| `deploytx` / `factorydeploytx` | new contract code + storage roots |
+| `storagespam` | dense storage-slot writes (storage-trie growth) |
+| `erc20_bloater` / `erc20tx` | ERC-20 transfers — realistic balance-slot patterns |
+| `uniswap_swaps` | AMM swaps — deep, hot storage tries (the "DEX problem") |
+| `gasburnertx` | gas consumption without state change (execution load) |
+| `storagerefundtx` | slot clears — exercises refund + trie-deletion paths |
+
+The active set is narrowable via `ORCH_VERBS`. Verb **eligibility** is contract-dependency
+aware: verbs that need a deployed contract are excluded at startup rather than failing mid-run.
+
+## Why not just use mainnet
+
+Mainnet is the 1× anchor — the proof-size and trie-structure numbers on the
+[metrics page](/state-benchmarks/design/metrics) are measured there directly, and they're the
+load-bearing baseline. The interesting result is the *curve above* 1×. We don't generate that
+state from scratch: we continue an existing ~3.5× Bloatnet and grow it through the real execution
+path, so the result is a state any client can independently re-derive by replaying `payloads.rlp`.

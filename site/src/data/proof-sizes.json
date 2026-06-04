@@ -1,0 +1,14 @@
+{
+  "units": "bytes per eth_getProof response",
+  "method": "Fixed 742-address intersection (483 EOAs + 259 storage contracts) present byte-identical in every state, sampled via proof_getProofWithMeta on the wip-v21-proof build. mainnet @24954458, x3.5 = PRISTINE @24358000, x5 = rebloat @24546596. Seed 27 (state-benchmarks issue #27).",
+  "series": [
+    { "mult": 1.0, "accountP50": 3820, "accountP95": 3929, "storageP50": 4975, "measured": true },
+    { "mult": 3.5, "accountP50": 3822, "accountP95": 3942, "storageP50": 5091, "measured": true },
+    { "mult": 5.0, "accountP50": 4083, "accountP95": 4224, "storageP50": 5364, "measured": true }
+  ],
+  "pendingMults": [7.0, 10.0],
+  "storageLabel": "account + 1-slot storage proof, total bytes p50",
+  "crossClient": "Witness bytes are client-agnostic — EIP-1186 proofs are byte-identical across clients for the same state root. Verified Geth v1.17.3 vs Nethermind at 3.5× (per-proof Δ = 0). Besu / Reth / Erigon use the same fixed address set; pending.",
+  "finding": "Typical witness depth stays at 8 levels across all milestones — individual proofs barely grow (+6–7% to 5×). A 16-slot combined witness is ~23–24 KB and stable across milestones and clients. The witness blow-up comes from touching more state per block, not bigger proofs.",
+  "note": "1× / 3.5× / 5× are measured on the same address set and are directly comparable. 7× and 10× are pending."
+}

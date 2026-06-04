@@ -1,0 +1,20 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import Sidebar from '../components/Sidebar.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description } = Astro.props;
+---
+<BaseLayout title={title} description={description}>
+  <div class="mx-auto max-w-7xl px-6 py-12 grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-12">
+    <aside class="lg:sticky lg:top-24 lg:self-start">
+      <Sidebar />
+    </aside>
+    <article class="prose-site">
+      <slot />
+    </article>
+  </div>
+</BaseLayout>

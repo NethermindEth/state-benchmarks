@@ -1,0 +1,14 @@
+---
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const year = new Date().getFullYear();
+---
+<footer class="border-t border-ink-800 mt-24 py-10 text-sm text-ink-400">
+  <div class="mx-auto max-w-7xl px-6 flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
+    <div>© {year} state-benchmarks · Ethereum state growth research</div>
+    <div class="flex gap-4">
+      <a href={`${base}/about`} class="hover:text-white">About</a>
+      <a href="https://github.com/NethermindEth/state-benchmarks" target="_blank" rel="noreferrer noopener" class="hover:text-white">GitHub</a>
+      <a href="https://ethereum.foundation" target="_blank" rel="noreferrer noopener" class="hover:text-white">EF</a>
+    </div>
+  </div>
+</footer>

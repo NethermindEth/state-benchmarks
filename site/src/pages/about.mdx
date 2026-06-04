@@ -1,0 +1,86 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: About
+description: What this project is, who runs it, and where it stands.
+---
+
+import Section from '../components/Section.astro';
+import Card from '../components/ui/Card.astro';
+import Stat from '../components/ui/Stat.astro';
+
+<Section eyebrow="About" title="What this is.">
+
+A research project at **Nethermind** measuring how Ethereum execution clients behave when the
+chain's state is many times larger than today's mainnet. We continue an existing community
+"Bloatnet" — a devnet whose state was already grown to roughly 3.5× mainnet — and push it further,
+up to 10×, benchmarking the things that decide whether the network can safely raise the gas limit
+and move toward statelessness.
+
+## Where it stands
+
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 not-prose my-6">
+  <Stat value="3.5×" label="picked up here" sub="inherited Bloatnet state" />
+  <Stat measured value="5×" label="reached" sub="1.11 TB of state, June 2026" />
+  <Stat value="7×" label="in progress" sub="bloating run underway" />
+  <Stat value="10×" label="final target" sub="the headline goal" />
+</div>
+
+We took the existing ~3.5× Bloatnet state and continued growing it to 5× — this time steering the
+state's *shape* (the mix of accounts, storage, and contract code) to match real mainnet, so each
+size is a fair comparison. Real mainnet (1×) is our measured reference point, not a state we
+generated. 7× and 10× come next, followed by the cross-client benchmark round.
+
+## The team
+
+- **Marcin Sobczak** — lead
+- **Daniil Ankushin** — bloating tooling, measurement, analysis
+- **Dmytro Belitskyi** — benchmarking and client testing
+
+## Building on prior work
+
+The ~3.5× state we start from is the **Bloatnet initiative** — a community effort by the
+**Stateless Consensus** team and **EthPandaOps**, who built the bloated devnet and the
+[`spamoor`](https://github.com/ethpandaops/spamoor) transaction tool used to grow it (public
+write-up by [Carlos Pérez](https://cperezz.github.io/bloatnet-website/)). This project takes that
+state and carries it further — to 5× and beyond — with mainnet-faithful composition and
+cross-client measurement.
+
+## Mainnet, in numbers
+
+The baseline everything is measured against — real Ethereum mainnet, May 2026:
+
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 not-prose my-6">
+  <Stat measured value="381M" label="accounts" />
+  <Stat measured value="1.56B" label="storage slots" />
+  <Stat measured value="221 GB" label="total state" />
+  <Stat measured value="~3.8 KB" label="typical proof size" />
+</div>
+
+That last number — the size of the cryptographic proof a stateless client needs per account — is
+the figure any future upgrade (like Verkle trees) has to beat. Capturing it across every state
+size is one of the project's main deliverables.
+
+## Why it matters
+
+<div class="grid md:grid-cols-3 gap-4 not-prose my-6">
+  <Card title="Gas limit">
+    Bigger blocks only help if clients keep up. We find where performance breaks before the network does.
+  </Card>
+  <Card title="Statelessness">
+    Moving proofs around the network only works if they stay small. We measure how they grow with state.
+  </Card>
+  <Card title="Open by default">
+    All tooling, data, and results are public, and any client team can reproduce the experiment.
+  </Card>
+</div>
+
+## Follow along
+
+The project lives in the open on GitHub. Results and tooling are published as each milestone
+lands; the [Docs](/state-benchmarks/docs) page explains how the rig works, and
+[Results](/state-benchmarks/results) shows the measured numbers so far.
+
+- Code & data — [github.com/NethermindEth/state-benchmarks](https://github.com/NethermindEth/state-benchmarks)
+- Questions or critique — open a GitHub issue
+
+</Section>

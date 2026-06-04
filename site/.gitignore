@@ -1,0 +1,13 @@
+node_modules
+dist
+.astro
+.env
+.env.*
+!.env.example
+.DS_Store
+pagefind
+
+# agent tooling state (not part of the site)
+.claude-flow
+.omc
+.claude

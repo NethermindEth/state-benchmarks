@@ -1,0 +1,46 @@
+---
+interface Props {
+  id?: string;
+  className?: string;
+  eyebrow?: string;
+  title?: string;
+  intro?: string;
+}
+const { id, className = '', eyebrow, title, intro } = Astro.props;
+---
+<section
+  id={id}
+  class:list={[
+    'reveal mx-auto max-w-7xl px-6 py-20 opacity-0 translate-y-6 transition-all duration-700',
+    className,
+  ]}
+>
+  {eyebrow && <div class="text-xs uppercase tracking-[0.18em] text-accent-400 mb-3">{eyebrow}</div>}
+  {title && <h2 class="font-display text-3xl md:text-4xl text-white max-w-3xl">{title}</h2>}
+  {intro && <p class="mt-4 text-ink-300 max-w-2xl text-lg">{intro}</p>}
+  <div class={title || intro ? 'mt-10' : ''}>
+    <slot />
+  </div>
+</section>
+
+<script is:inline>
+  (() => {
+    const reveal = () => {
+      const els = document.querySelectorAll('.reveal');
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.remove('opacity-0', 'translate-y-6');
+            io.unobserve(e.target);
+          }
+        }
+      }, { rootMargin: '0px 0px -10% 0px', threshold: 0.05 });
+      els.forEach((el) => io.observe(el));
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', reveal);
+    } else {
+      reveal();
+    }
+  })();
+</script>

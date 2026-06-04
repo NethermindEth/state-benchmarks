@@ -1,0 +1,127 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Section from '../components/Section.astro';
+import Card from '../components/ui/Card.astro';
+import Callout from '../components/ui/Callout.astro';
+import StateGrowthHero from '../components/hero/StateGrowthHero.tsx';
+import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
+import growth from '../data/state-growth.json';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<BaseLayout title="state-benchmarks" description="Benchmarking Ethereum execution clients at 10x mainnet state to inform gas-limit increases and the statelessness roadmap.">
+  <!-- HERO -->
+  <section class="relative overflow-hidden">
+    <div
+      class="absolute inset-0 -z-10 bg-hero-grid [background-size:24px_24px] opacity-60"
+      aria-hidden="true"
+    ></div>
+    <div class="absolute -z-10 inset-x-0 -top-40 h-[60rem] bg-gradient-to-b from-accent-500/15 via-accent-500/5 to-transparent blur-3xl" aria-hidden="true"></div>
+
+    <div class="mx-auto max-w-7xl px-6 pt-20 pb-24">
+      <div class="max-w-3xl">
+        <div class="inline-flex items-center gap-2 rounded-full border border-accent-500/40 bg-accent-500/10 px-3 py-1 text-xs uppercase tracking-widest text-accent-400">
+          <span class="size-1.5 rounded-full bg-accent-400 animate-pulse"></span>
+          EF 2026 · Scale + Harden L1
+        </div>
+        <h1 class="mt-6 font-display text-5xl md:text-7xl font-bold text-white leading-[1.05] tracking-tight">
+          What breaks when<br/>
+          Ethereum state hits <span class="text-accent-400">10×</span>?
+        </h1>
+        <p class="mt-6 text-lg md:text-xl text-ink-300 max-w-2xl">
+          Mainnet is 381M accounts, 1.56B storage slots, 221 GB of trie. We pick up an existing
+          ~3.5× Bloatnet and a Go controller drives it further — past <span class="text-white font-medium">5× (1.11 TB)</span>
+          toward 10× — benchmarking proof sizes, block execution, and snap sync across five EL
+          clients to turn the gas-limit debate into a data problem.
+        </p>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <a href={`${base}/design/overview`} class="rounded-lg bg-accent-500 hover:bg-accent-400 text-ink-950 font-medium px-5 py-3 transition-colors">
+            Explore the design →
+          </a>
+          <a href={`${base}/results`} class="rounded-lg border border-ink-700 hover:border-ink-500 text-white px-5 py-3 transition-colors">
+            See the numbers
+          </a>
+        </div>
+      </div>
+
+      <div class="mt-20">
+        <StateGrowthHero client:load milestones={growth.milestones} />
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY -->
+  <Section
+    eyebrow="Why this matters"
+    title="Two protocol-level decisions ride on these numbers."
+    intro="The 2026 forks ask validators to absorb more state and more witnesses than ever. Every gas-limit bump and every step toward statelessness needs a load-bearing answer to: what is the actual cost?"
+  >
+    <div class="grid md:grid-cols-2 gap-6">
+      <Card title="Glamsterdam · gas limit toward 100M+">
+        Bigger blocks mean more state mutations per second. If client throughput collapses
+        non-linearly above 3×–5× mainnet, the gas debate is moot. We measure where the
+        cliffs are before the chain finds them.
+      </Card>
+      <Card title="Hegotá · the statelessness baseline">
+        Verkle wins are usually argued in the abstract. By instrumenting <code>eth_getProof</code>
+        across the full multiplier ladder, we produce the MPT witness curve that any
+        post-Verkle comparison has to beat.
+      </Card>
+    </div>
+  </Section>
+
+  <!-- GOALS -->
+  <Section
+    eyebrow="Goals"
+    title="Three deliverables, written in the language of the protocol."
+  >
+    <div class="grid md:grid-cols-3 gap-6">
+      <Card title="① Bloated states, reproducibly">
+        Starting from the inherited ~3.5× Bloatnet, a Go controller grows the state through 5×
+        (reached), 7×, 10×. Every run emits a portable <code>payloads.rlp</code> stream + manifest,
+        so any client can replay the exact state and verify the final root.
+      </Card>
+      <Card title="② Cross-client measurement">
+        The same workload is replayed on Nethermind, Geth, Besu, Reth, and Erigon. Bit-exact
+        cross-client replay was validated 2026-04-29 against a known state root; from there
+        every metric is collected the same way on every client.
+      </Card>
+      <Card title="③ Open report">
+        All scripts, data, and analyses live in the
+        <a href="https://github.com/NethermindEth/state-benchmarks" target="_blank" rel="noreferrer noopener">NethermindEth/state-benchmarks</a>
+        repo. The point is not a paper; it is a substrate other researchers can extend without re-doing the plumbing.
+      </Card>
+    </div>
+  </Section>
+
+  <!-- CHART -->
+  <Section
+    eyebrow="State growth"
+    title="The curve we are climbing."
+    intro="Three milestones are measured exactly — mainnet (1×, our reference), the inherited 3.5× Bloatnet state, and the 5× state we grew it to (1.11 TB). 7× and 10× are empty slots until generated. No projected numbers."
+  >
+    <div class="rounded-2xl border border-ink-800 bg-ink-900/40 p-6">
+      <StateGrowthChart client:visible data={growth.milestones} />
+    </div>
+  </Section>
+
+  <!-- PROBLEM/SOLUTION SAMPLER -->
+  <Section
+    eyebrow="The shape of the problem"
+    title="A 10× state is not a 10× cost."
+  >
+    <Callout type="problem" title="Why naïve extrapolation fails">
+      Trie depth grows roughly as <em>log₁₆(n)</em>, but IO cost is dominated by random
+      reads into a snapshot DB that already spills LSM levels at mainnet size. The
+      pricing curve has knees, not slopes.
+    </Callout>
+    <Callout type="solution" title="What we do about it">
+      Measure at every milestone — not just the endpoints. The 5×, 7×, 10× rungs exist
+      to catch the knees before 10× makes them invisible.
+    </Callout>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href={`${base}/problems`} class="text-accent-400 hover:text-accent-300">Full problem statement →</a>
+      <a href={`${base}/design/metrics`} class="text-accent-400 hover:text-accent-300">Metric definitions (with math) →</a>
+    </div>
+  </Section>
+</BaseLayout>

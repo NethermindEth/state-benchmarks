@@ -1,0 +1,6 @@
+{
+  "clients": ["nethermind", "geth", "besu", "reth", "erigon"],
+  "measured": false,
+  "series": [],
+  "note": "No cross-client benchmark data collected yet. The benchmark battery (issue #21) runs sync, execution-under-head, and JSON-RPC latency on Nethermind, Geth, Besu, Reth, and Erigon at each milestone; results land in benchmarks/<milestone>/ as they're produced."
+}

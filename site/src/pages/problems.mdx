@@ -1,0 +1,106 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Problems
+description: What actually goes wrong as Ethereum state grows beyond mainnet size.
+---
+
+import Section from '../components/Section.astro';
+import Callout from '../components/ui/Callout.astro';
+
+<Section eyebrow="Problems" title="What breaks first, second, and last." intro="A taxonomy of the failure modes that show up before 10× — many of them already visible at 3×.">
+
+## 1. Trie depth and IO amplification
+
+Each account access traverses an MPT path whose expected depth is
+
+$$
+\mathbb{E}[d] \approx \log_{16}(n)
+$$
+
+for $n$ accounts. Mainnet today is $n = 3.81\!\times\!10^8$ accounts with **avg path depth 7.61** nibbles (measured 2026-05-05). Going to $10n$ adds only **one nibble** of depth on average. The problem isn't *depth* — it's that each level is a **random read** into a snapshot DB whose LSM levels have already overflowed page cache.
+
+<Callout type="problem" title="The IO knee">
+  Below the working-set size, every trie hop is a memory access. Above it, every hop is a disk seek.
+  The transition is sharp, and on mainnet it lives somewhere between 1.5× and 3× depending on the host.
+</Callout>
+
+## 2. Witness inflation
+
+Account proof size is the path length times the per-level RLP cost. Empirically:
+
+$$
+\text{proof}_{\text{acc}}(n) \approx c_0 + c_1 \cdot \log_{16}(n)
+$$
+
+with $c_1 \approx 530$ bytes per nibble (sibling hashes + RLP framing). Measured mainnet account proofs come in at **p50 = 3,821 B / p95 = 3,929 B** (sample of 2,755 unique addresses at head 24,935,360). The log-16 model predicts that 10× pushes p95 to ~**4,370 B** — uncomfortable but tractable. Two places where it bites:
+
+- **Light clients** that download proofs over slow links.
+- **Stateless block validation**, where a single block's witness is the *sum* of all account
+  and storage proofs touched.
+
+<Callout type="problem" title="Witness compounds with access count">
+  A block touching 2000 storage slots emits ~2000 × p95 storage proofs — easily multi-megabyte
+  even before EIP-4844 framing. Verkle's case rests on collapsing this term.
+</Callout>
+
+## 3. Snap sync stability
+
+Snap sync transfers the state by ranges of leaves and reconstructs the trie locally. Two
+problems show up only at scale:
+
+- **Range churn**: as the source node's state mutates during the sync, ranges have to be
+  refetched. At 10× mainnet the steady-state mutation rate dominates the catch-up rate
+  unless the bandwidth budget is increased.
+- **Heal phase divergence**: the final "fix the gaps" stage stops being negligible. At
+  10× we observe healing tails that exceed the bulk phase on slower disks.
+
+## 4. Storage trie pathology
+
+Mainnet has thousands of contracts with deep, sparse storage tries (DEX pools, NFT
+mappings). The measured slot-per-contract distribution is sharply long-tailed — across
+26.4M contracts with non-empty storage:
+
+| Slots in contract | # contracts |
+|---|---:|
+| 1     | 18,210,124 |
+| 2–3   | 4,038,607  |
+| 4–7   | 2,396,672  |
+| …     | …          |
+| 4k–8k | 7,598      |
+| 8k–16k | 4,421     |
+| 16k+  | 4,360      |
+
+That's **~87 % of contracts owning 1–3 slots**, with a tiny tail of ~4k contracts holding
+16k+ slots each — and dominating total storage bytes. A Pareto model with $\alpha < 1$
+fits well enough for intuition, but the empirical histogram is the truth we hold the
+bloater to.
+
+<Callout type="problem" title="The DEX problem">
+  Synthetic state generation that produces uniqueness ratio below ~0.85 or multiplicity max
+  above ~2,500 is introducing clustering that doesn't occur naturally. Mainnet sits at
+  **86.2 % unique storage roots** (sample of 100k contracts, 2026-05-05); that's the floor
+  bloated states must stay above.
+</Callout>
+
+## 5. Memory pressure on the trie cache
+
+Modern clients keep a trie node cache in RAM (Nethermind: clean cache + dirty memory; Geth:
+trie cache). The hit rate is roughly
+
+$$
+H \approx 1 - \left(1 - \frac{|\text{cache}|}{|\text{live nodes}|}\right)^{k}
+$$
+
+for $k$ trie hops per block. Instrumented Nethermind reports **account-proof cache hit
+rate of ~100 %** and **storage-proof cache hit rate of 94.6 % mean / 99.1 % p95** on
+mainnet (sample at head 24,954,458). That headroom is what disappears first as state
+grows — and the moment hits drop below ~90 %, a single miss is a ~200 µs disk seek
+inside the EVM hot loop.
+
+---
+
+The point of running the experiment at every multiplier — not just at 10× — is that **each
+of these failure modes has a different knee**, and you only see the staircase if you have
+points on every step.
+
+</Section>

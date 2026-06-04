@@ -1,0 +1,15 @@
+{
+  "metric": "account-trie leaf count by structural depth level (TrieDiffWalker convention)",
+  "source": "1× from state-benchmarks #5 (geth inspect-trie value-node column); 5× from #29 (sidecar full re-scan valueNodeCount). Both exact.",
+  "avgDepth": { "x1": 7.61, "x5": 8.20 },
+  "levels": [
+    { "depth": 8,  "x1": 92723918,   "x5": 1186965 },
+    { "depth": 9,  "x1": 251137398,  "x5": 1251962794 },
+    { "depth": 10, "x1": 29870177,   "x5": 683109803 },
+    { "depth": 11, "x1": 1543551,    "x5": 55646740 },
+    { "depth": 12, "x1": 12329,      "x5": 1339738 },
+    { "depth": 13, "x1": 144,        "x5": 6936 },
+    { "depth": 14, "x1": 0,          "x5": 10 }
+  ],
+  "note": "Normalised to % of all account leaves so the two state sizes are shape-comparable. The 5× distribution sits one level deeper — the structural consequence of 5× more accounts (log₁₆ growth), avg depth 7.61 → 8.20."
+}

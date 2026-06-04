@@ -1,0 +1,57 @@
+---
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const links = [
+  { href: `${base}/`, label: 'Home' },
+  { href: `${base}/goals`, label: 'Goals' },
+  { href: `${base}/problems`, label: 'Problems' },
+  { href: `${base}/design/overview`, label: 'Design' },
+  { href: `${base}/results`, label: 'Results' },
+  { href: `${base}/docs`, label: 'Docs' },
+  { href: `${base}/about`, label: 'About' },
+];
+const current = Astro.url.pathname.replace(/\/$/, '');
+---
+<header class="sticky top-0 z-30 backdrop-blur-md bg-ink-950/70 border-b border-ink-800">
+  <nav class="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
+    <a href={`${base}/`} class="flex items-center gap-2 font-display font-semibold text-white">
+      <svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="nav-g" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="#7dd3fc"/>
+            <stop offset="1" stop-color="#0ea5e9"/>
+          </linearGradient>
+        </defs>
+        <path d="M16 40 L32 16 L48 40 L40 40 L32 28 L24 40 Z" fill="url(#nav-g)"/>
+        <circle cx="32" cy="48" r="4" fill="#7dd3fc"/>
+      </svg>
+      <span>state-benchmarks</span>
+    </a>
+    <ul class="hidden md:flex items-center gap-1 text-sm">
+      {links.map((l) => {
+        const href = l.href.replace(/\/$/, '');
+        const active = current === href || (href.includes('/design') && current.startsWith(`${base}/design`));
+        return (
+          <li>
+            <a
+              href={l.href}
+              class:list={[
+                'px-3 py-2 rounded-md transition-colors',
+                active ? 'text-white bg-ink-800' : 'text-ink-300 hover:text-white hover:bg-ink-800/50',
+              ]}
+            >
+              {l.label}
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+    <a
+      href="https://github.com/NethermindEth/state-benchmarks"
+      class="text-ink-300 hover:text-white text-sm hidden sm:inline-block"
+      rel="noreferrer noopener"
+      target="_blank"
+    >
+      GitHub →
+    </a>
+  </nav>
+</header>

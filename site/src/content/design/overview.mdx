@@ -1,0 +1,103 @@
+---
+title: System overview
+description: How the Go orchestrator, the StateDiffsWriter plugin, and the sidecar tracker fit together.
+order: 1
+---
+
+import Callout from '../../components/ui/Callout.astro';
+import Card from '../../components/ui/Card.astro';
+import PipelineDiagram from '../../components/PipelineDiagram.astro';
+
+# System overview
+
+The rig is a closed loop: a Go orchestrator drives a Nethermind node toward a mainnet-shaped
+target, a lean plugin writes per-block trie diffs to disk, and a separate sidecar consumes
+those diffs to track state composition and feed the controller back.
+
+<PipelineDiagram />
+
+<div class="grid md:grid-cols-3 gap-4 not-prose my-6">
+  <Card title="Orchestrator (Go)">
+    A single static binary. Closed-loop controller scores bloating "verbs" against a target
+    composition, submits transactions through the Engine API, and records every committed block
+    as a replayable payload. Replaces the earlier Python prototype.
+  </Card>
+  <Card title="StateDiffsWriter plugin">
+    Runs in Nethermind. On every committed block it walks the trie diff and writes a compact RLP
+    record to a dedicated `BlockDiffs` RocksDB column family — and nothing else. No in-engine
+    tracker, no scan on startup. ([nethermind#11788](https://github.com/NethermindEth/nethermind/pull/11788))
+  </Card>
+  <Card title="Sidecar (Go)">
+    Opens the node's RocksDB in **secondary mode**, bootstrap-scans once, then tails the
+    `BlockDiffs` CF. Maintains the running state composition and serves it over a `statecomp_get`
+    JSON-RPC plus a Prometheus endpoint. Restartable independently of the chain.
+  </Card>
+</div>
+
+## Why the tracker moved out of the engine
+
+The previous design kept the composition tracker *inside* Nethermind (the `StateComposition`
+plugin). It worked at mainnet size and held up through ~3.5×, but broke at 5×.
+
+<Callout type="problem" title="The OOM that forced the redesign">
+  At 5× mainnet state the in-process tracker OOM'd mid-scan — anonymous RSS spiked to **99 GB
+  against a 122 GB container limit**. The bootstrap scan (random-IO depth-first walk plus
+  per-leaf read-modify-write across three column families) pinned the engine's heap with
+  hundreds of millions of dictionary entries, even when the bloater was idle.
+</Callout>
+
+<Callout type="solution" title="Diff-only plugin + external sidecar">
+  Split responsibilities. The engine-side plugin now only **emits** per-block trie diffs (it
+  already computes them; writing them is nearly free). All the memory-hungry tracking —
+  bootstrap scan, dedup, slot-count accounting, snapshotting — moves to a **sidecar process**
+  that reads the same RocksDB in secondary mode. The sidecar picks its own memory budget and can
+  be killed and restarted without touching the chain. About **5,700 LOC of in-engine tracker
+  code was deleted.**
+</Callout>
+
+This shape has driven a live 5× bloating run for 16+ hours: ~858 GB state, sensor tracking chain
+head with **0 blocks behind**, and **0 engine rescans** across multiple graceful restarts.
+
+## Design constraints
+
+<Callout type="goal" title="C1 — reproducibility by replay">
+  Every run emits `payloads.rlp` (the committed block stream) + `run-manifest.json`
+  (genesis hash, target history, final state root). Anyone can replay the exact run on any
+  Engine-API client and verify the final state root bit-for-bit.
+</Callout>
+
+<Callout type="goal" title="C2 — client-agnostic measurement">
+  Headline metrics come from standard JSON-RPC every EL exposes. The diff plugin is
+  Nethermind-only because it's the bloating driver; the *measurement* targets (Geth, Besu,
+  Reth, Erigon) run stock.
+</Callout>
+
+<Callout type="goal" title="C3 — engine stays lean">
+  No long-running scan on any engine startup or recovery path. The chain node does chain work;
+  the sidecar does accounting. A crash in one never blocks the other.
+</Callout>
+
+## Wire format (`BlockDiffs` column family)
+
+Each value is a strict-additive RLP list keyed by 8-byte big-endian block number:
+
+```
+[ blockNumber, postStateRoot, codeHashChanges[], slotCountChanges[],
+  accountTrieBytesDelta?, storageTrieBytesDelta?, accountsAddedDelta? ]
+```
+
+Trailing fields can be added without breaking older consumers; the sidecar's length-prefixed
+decoder tolerates the non-canonical `long` encodings C# RLP emits.
+
+## What lives where
+
+| Concern                        | Location                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| Closed-loop controller, verbs  | `orchestrator/internal/controller`, `orchestrator/internal/verbs` (Go)   |
+| Diff emission                  | Nethermind `StateDiffsWriter` plugin ([#11788](https://github.com/NethermindEth/nethermind/pull/11788)) |
+| State-composition tracker      | `orchestrator/cmd/sidecar` — RocksDB secondary ([#77](https://github.com/NethermindEth/eth-perf-research/pull/77)) |
+| Cross-EL replay + gap healing  | `orchestrator/cmd/orchestrator replay`, `orchestrator/cmd/heal-payloads` |
+| Run artifacts                  | `journal.bin`, `payloads.rlp`, `run-manifest.json`                       |
+| Reports                        | this site, `/results`                                                    |
+
+Next: the bloating verbs and how the controller decides what to send. →
