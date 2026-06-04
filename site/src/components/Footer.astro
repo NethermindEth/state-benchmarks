@@ -11,19 +11,9 @@ const social = [
 <footer class="border-t border-ink-800 mt-24 py-12 text-sm text-ink-400">
   <div class="mx-auto max-w-7xl px-6 grid gap-8 md:grid-cols-[1fr_auto]">
     <div class="max-w-md">
-      <div class="flex items-center gap-2 text-white font-display font-semibold">
-        <svg width="20" height="20" viewBox="0 0 64 64" aria-hidden="true">
-          <defs>
-            <linearGradient id="foot-g" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0" stop-color="#00b3ff"/>
-              <stop offset="1" stop-color="#0090d6"/>
-            </linearGradient>
-          </defs>
-          <path d="M16 40 L32 16 L48 40 L40 40 L32 28 L24 40 Z" fill="url(#foot-g)"/>
-          <circle cx="32" cy="48" r="4" fill="#00b3ff"/>
-        </svg>
-        <span>state-benchmarks</span>
-      </div>
+      <a href="https://nethermind.io" target="_blank" rel="noreferrer noopener" class="inline-block">
+        <img src={`${base}/nm-logo-horizontal.svg`} alt="Nethermind" class="h-7 w-auto" />
+      </a>
       <p class="mt-3 leading-relaxed">
         A <a href="https://nethermind.io" target="_blank" rel="noreferrer noopener" class="text-accent-400 hover:text-accent-500">Nethermind</a> project.
         Nethermind builds and secures core Ethereum infrastructure — from clients and ZK systems
