@@ -7,7 +7,6 @@ import Placeholder from '../components/ui/Placeholder.astro';
 import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
 import CompositionChart from '../components/charts/CompositionChart.tsx';
 import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx';
-import ModelFitChart from '../components/charts/ModelFitChart.tsx';
 import growth from '../data/state-growth.json';
 import proofs from '../data/proof-sizes.json';
 import clients from '../data/client-comparison.json';
@@ -41,29 +40,14 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="eth_getProof witness size">
-        <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set sampled in every state, so the bars are directly comparable. Individual proofs barely grow — witness depth stays at 8 levels.</p>
-        <ProofComparisonChart client:visible data={proofs.series} pendingMults={proofs.pendingMults} />
-        <p class="mt-4 text-sm text-ink-400">{proofs.finding}</p>
-
-        <div class="mt-8 pt-6 border-t border-ink-800">
-          <div class="text-xs uppercase tracking-wider text-ink-400 mb-1">Measured vs theory</div>
-          <h4 class="font-display text-white mb-3">Account proof vs the log₁₆ law &nbsp;p(n) = c₀ + c₁·log₁₆(n)</h4>
-          <ModelFitChart
-            client:visible
-            model={{ kind: 'log16', c0: 3820, c1: 441, xRef: 381 }}
-            points={[
-              { x: 381, y: 3820, measured: true, label: '1×' },
-              { x: 392, y: 3822, measured: true, label: '3.5×' },
-              { x: 1993, y: 4083, measured: true, label: '5×' },
-            ]}
-            xDomain={[350, 2100]}
-            xLabel="account count (millions)"
-            yLabel="account proof p50 (bytes)"
-            xFmt="millions"
-            yFmt="kb"
-          />
-          <p class="mt-4 text-sm text-ink-400">The orange line is the formula's prediction; the blue dots are measured. Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why the 3.5× state (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher.</p>
-        </div>
+        <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set sampled in every state, so the bars are directly comparable. The dashed white line is the theoretical account-proof model <code>p(n) = c₀ + c₁·log₁₆(n)</code> — measured bars track it closely.</p>
+        <ProofComparisonChart
+          client:visible
+          data={proofs.series}
+          pendingMults={proofs.pendingMults}
+          theory={[{ mult: 1, y: 3820 }, { mult: 3.5, y: 3825 }, { mult: 5, y: 4083 }]}
+        />
+        <p class="mt-4 text-sm text-ink-400">Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why 3.5× (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher. {proofs.finding}</p>
       </Card>
 
       <Card title="Cross-client comparison">

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
 interface Row { mult: number; accountP50: number; accountP95: number; storageP50: number; measured?: boolean }
-interface Props { data: Row[]; pendingMults?: number[] }
+interface Props { data: Row[]; pendingMults?: number[]; theory?: { mult: number; y: number }[] }
 
 const SERIES = [
   { key: 'accountP50', label: 'account p50', color: '#00b3ff' },
@@ -10,13 +10,13 @@ const SERIES = [
   { key: 'storageP50', label: 'account + 1 slot p50', color: '#ff9900' },
 ] as const;
 
-export default function ProofComparisonChart({ data, pendingMults = [] }: Props) {
+export default function ProofComparisonChart({ data, pendingMults = [], theory = [] }: Props) {
   const ref = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
-    const W = 720, H = 360, M = { top: 40, right: 24, bottom: 44, left: 56 };
+    const W = 720, H = 372, M = { top: 56, right: 24, bottom: 44, left: 56 };
 
     const allMults = [...data.map(d => d.mult), ...pendingMults].sort((a, b) => a - b);
     const x0 = d3.scaleBand().domain(allMults.map(m => `${m}x`)).range([M.left, W - M.right]).paddingInner(0.3).paddingOuter(0.1);
@@ -68,13 +68,38 @@ export default function ProofComparisonChart({ data, pendingMults = [] }: Props)
         .attr('text-anchor', 'middle').attr('fill', '#34d399').attr('font-size', 9).attr('font-family', 'JetBrains Mono').text('measured');
     });
 
+    // theoretical model overlay (log16 prediction for the account-p50 series)
+    const theoryPts = theory
+      .filter(t => x0(`${t.mult}x`) != null)
+      .map(t => ({ cx: x0(`${t.mult}x`)! + x1('accountP50')! + x1.bandwidth() / 2, cy: y(t.y) }));
+    if (theoryPts.length > 1) {
+      const tline = d3.line<{ cx: number; cy: number }>().x(d => d.cx).y(d => d.cy);
+      const tpath = svg.append('path').datum(theoryPts)
+        .attr('fill', 'none').attr('stroke', '#ffffff').attr('stroke-width', 2)
+        .attr('stroke-dasharray', '5 4').attr('opacity', 0.85).attr('d', tline);
+      const len = (tpath.node() as SVGPathElement).getTotalLength();
+      tpath.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len)
+        .transition().delay(400).duration(1000).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0)
+        .on('end', () => tpath.attr('stroke-dasharray', '5 4'));
+    }
+    theoryPts.forEach((p) => {
+      svg.append('circle').attr('cx', p.cx).attr('cy', p.cy).attr('r', 0)
+        .attr('fill', '#00253d').attr('stroke', '#ffffff').attr('stroke-width', 2)
+        .transition().delay(1100).duration(250).attr('r', 4);
+    });
+
     const legend = svg.append('g').attr('transform', `translate(${M.left + 4},${M.top - 26})`);
     SERIES.forEach((s, i) => {
       const g = legend.append('g').attr('transform', `translate(${i * 150},0)`);
       g.append('rect').attr('width', 12).attr('height', 12).attr('rx', 2).attr('fill', s.color);
       g.append('text').attr('x', 18).attr('y', 11).attr('fill', '#aab2c2').attr('font-size', 12).text(s.label);
     });
-  }, [data, pendingMults]);
+    if (theory.length) {
+      const g = legend.append('g').attr('transform', 'translate(0,18)');
+      g.append('line').attr('x1', 0).attr('x2', 16).attr('y1', 6).attr('y2', 6).attr('stroke', '#ffffff').attr('stroke-width', 2).attr('stroke-dasharray', '5 4');
+      g.append('text').attr('x', 22).attr('y', 11).attr('fill', '#aab2c2').attr('font-size', 12).text('theory: account p50 = c₀ + c₁·log₁₆(n)');
+    }
+  }, [data, pendingMults, theory]);
 
   return <svg ref={ref} className="w-full h-auto" role="img" aria-label="eth_getProof size across measured milestones" />;
 }
