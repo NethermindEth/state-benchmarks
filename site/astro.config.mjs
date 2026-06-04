@@ -7,8 +7,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
 export default defineConfig({
-  site: 'https://nethermindeth.github.io',
-  base: '/state-benchmarks',
+  site: 'https://literate-adventure-92og99n.pages.github.io',
+  base: '/',
   trailingSlash: 'ignore',
   integrations: [
     mdx(),

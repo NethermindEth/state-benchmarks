@@ -40,7 +40,7 @@ result. Each block is also saved to `payloads.rlp`, which **replays on any clien
   The orchestrator doesn't blindly spam transactions. It runs a feedback controller that steers
   the *composition* of the growing state toward a mainnet shape (the measured 27 % account /
   67 % storage / 6 % code split), choosing which kind of transaction to send next based on which
-  axis is currently underweight. Details on the [feedback-loop page](/state-benchmarks/design/orchestrator).
+  axis is currently underweight. Details on the [feedback-loop page](/design/orchestrator).
 </Callout>
 
 ## Bloating verbs
@@ -64,7 +64,7 @@ aware: verbs that need a deployed contract are excluded at startup rather than f
 ## Why not just use mainnet
 
 Mainnet is the 1× anchor — the proof-size and trie-structure numbers on the
-[metrics page](/state-benchmarks/design/metrics) are measured there directly, and they're the
+[metrics page](/design/metrics) are measured there directly, and they're the
 load-bearing baseline. The interesting result is the *curve above* 1×. We don't generate that
 state from scratch: we continue an existing ~3.5× Bloatnet and grow it through the real execution
 path, so the result is a state any client can independently re-derive by replaying `payloads.rlp`.
