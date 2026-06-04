@@ -8,14 +8,15 @@ interface Model {
   c0?: number; c1?: number;    // log16:  y = c0 + c1·log16(x / xRef)
   xRef?: number;
 }
+type Fmt = 'mult' | 'tb' | 'kb' | 'millions' | 'plain';
 interface Props {
   points: Point[];
   model: Model;
   xDomain: [number, number];
   xLabel: string;
   yLabel: string;
-  xTickFmt?: (n: number) => string;
-  yTickFmt?: (n: number) => string;
+  xFmt?: Fmt;
+  yFmt?: Fmt;
 }
 
 function evalModel(m: Model, x: number): number {
@@ -23,7 +24,17 @@ function evalModel(m: Model, x: number): number {
   return (m.c0 ?? 0) + (m.c1 ?? 0) * (Math.log(x / (m.xRef ?? 1)) / Math.log(16));
 }
 
-export default function ModelFitChart({ points, model, xDomain, xLabel, yLabel, xTickFmt, yTickFmt }: Props) {
+function fmtFor(kind: Fmt): (n: number) => string {
+  switch (kind) {
+    case 'mult': return (n) => `${n}×`;
+    case 'tb': return (n) => `${(n / 1000).toFixed(1)} TB`;
+    case 'kb': return (n) => `${(n / 1024).toFixed(1)} KB`;
+    case 'millions': return (n) => `${Math.round(n)}M`;
+    default: return (n) => `${n}`;
+  }
+}
+
+export default function ModelFitChart({ points, model, xDomain, xLabel, yLabel, xFmt = 'plain', yFmt = 'plain' }: Props) {
   const ref = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
@@ -40,8 +51,8 @@ export default function ModelFitChart({ points, model, xDomain, xLabel, yLabel, 
     const yMax = Math.max(d3.max(curve, d => d.y)!, d3.max(points, d => d.y)!) * 1.1;
     const y = d3.scaleLinear().domain([0, yMax]).nice().range([H - M.bottom, M.top]);
 
-    const xfmt = xTickFmt ?? ((n: number) => `${n}`);
-    const yfmt = yTickFmt ?? ((n: number) => `${n}`);
+    const xfmt = fmtFor(xFmt);
+    const yfmt = fmtFor(yFmt);
 
     svg.attr('viewBox', `0 0 ${W} ${H}`);
 
@@ -94,7 +105,7 @@ export default function ModelFitChart({ points, model, xDomain, xLabel, yLabel, 
     legend.append('text').attr('x', 28).attr('y', 10).attr('fill', '#a9c8db').attr('font-size', 12).text('theoretical model');
     legend.append('circle').attr('cx', 178).attr('cy', 6).attr('r', 5).attr('fill', '#00b3ff');
     legend.append('text').attr('x', 190).attr('y', 10).attr('fill', '#a9c8db').attr('font-size', 12).text('measured');
-  }, [points, model, xDomain]);
+  }, [points, model, xDomain, xFmt, yFmt]);
 
   return <svg ref={ref} className="w-full h-auto" role="img" aria-label="Theoretical model fit against measured data" />;
 }
