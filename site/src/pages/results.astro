@@ -61,7 +61,7 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
     </div>
 
     <!-- measured vs theory -->
-    <h3 class="font-display text-2xl text-white mt-16 mb-2">Measured vs theory</h3>
+    <h3 id="measured-vs-theory" class="font-display text-2xl text-white mt-16 mb-2 scroll-mt-24">Measured vs theory</h3>
     <p class="text-ink-300 max-w-2xl mb-8">The orange line is what the formula predicts; the blue dots are what we actually measured. Where they coincide, the model holds — and where a point sits off the curve, it tells us something real.</p>
     <div class="grid grid-cols-1 gap-12">
       <Card title="Total size vs the linear law  T(m) = 221.4·m">
