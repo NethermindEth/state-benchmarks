@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "locust>=2.44.0",
+    "prometheus-client>=0.20.0",
     "pyyaml>=6.0.3",
     "requests>=2.34.2",
 ]

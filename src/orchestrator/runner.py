@@ -168,7 +168,7 @@ def run_locust_load_test(config_path: str, milestone_dir: str, client: str):
     })
     logger.info("Locust load test completed.")
 
-def run_benchmark_for_client(client: str, milestone: str, skip_sync: bool, config_path: str):
+def run_benchmark_for_client(client: str, milestone: str, skip_sync: bool, config_path: str, stop_monitoring: bool):
     logger.info(f"=== Starting benchmark for {client} ===")
     milestone_dir = os.path.join("benchmarks", milestone)
     os.makedirs(milestone_dir, exist_ok=True)
@@ -206,7 +206,10 @@ def run_benchmark_for_client(client: str, milestone: str, skip_sync: bool, confi
             "--milestone", milestone,
         ], check=True)
     finally:
-        stop_infrastructure()
+        if stop_monitoring:
+            stop_infrastructure()
+        else:
+            logger.info("Leaving infrastructure running (pass --stop-monitoring to tear it down).")
     logger.info(f"=== Finished benchmark for {client} ===\n")
 
 def main():
@@ -215,6 +218,12 @@ def main():
     parser.add_argument("--client", type=str, help="Specific Ethereum client to benchmark (optional, defaults to config.yml list)")
     parser.add_argument("--milestone", type=str, required=True, help="Milestone label (e.g., v1.0.0)")
     parser.add_argument("--skip-sync", action="store_true", help="Skip the sync phase if already synced")
+    parser.add_argument(
+        "--stop-monitoring",
+        action="store_true",
+        help="Tear down the monitoring + clients stack after the run. "
+             "Default is to leave it running so Grafana/Prometheus remain reachable for inspection.",
+    )
 
     args = parser.parse_args()
 
@@ -235,7 +244,7 @@ def main():
         return
 
     for client in clients_to_run:
-        run_benchmark_for_client(client, args.milestone, args.skip_sync, args.config)
+        run_benchmark_for_client(client, args.milestone, args.skip_sync, args.config, args.stop_monitoring)
 
 if __name__ == "__main__":
     main()

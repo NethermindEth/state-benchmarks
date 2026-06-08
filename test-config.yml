@@ -1,0 +1,72 @@
+# Test config: points the orchestrator at the self-contained docker-compose.test.yml stack.
+# Use with: uv run python src/orchestrator/runner.py --config test-config.yml --milestone smoke --skip-sync
+infrastructure:
+  manage: true
+  ssh_command: ""
+  compose_paths:
+    # Same file for both — the runner runs "up -d" twice (once per role); idempotent.
+    monitoring: "docker/docker-compose.test.yml"
+    clients: "docker/docker-compose.test.yml"
+
+nodes:
+  rpc_url: "http://localhost:8545"
+  clients:
+    - "test-client"
+  data_dirs:
+    test-client: "/root/.ethereum"
+
+metrics:
+  prometheus_url: "http://localhost:9090"
+  # Dev chain runs at 1 block/sec; 1-minute window is enough to populate histograms.
+  sync_window: "5m"
+  load_window: "1m"
+  queries:
+    cpu_percent_peak:           'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[30s]) * 100)[{window}:30s])'
+    cpu_percent_sustained:      'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[30s]) * 100)[{window}:30s])'
+    rss_peak_bytes:             'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes:        'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec:   'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak:  'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[30s])[{window}:30s])'
+    net_rx_bytes_per_sec_avg:   'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[30s])[{window}:30s])'
+    disk_iops_peak:             'max_over_time((rate(container_fs_reads_total{name="benchmark_{client}"}[30s]) + rate(container_fs_writes_total{name="benchmark_{client}"}[30s]))[{window}:30s])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time((rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[30s]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[30s]))[{window}:30s])'
+
+  client_queries:
+    test-client:
+      # Geth exposes go-metrics summaries with pre-computed quantile labels —
+      # not Prometheus histograms — so we read the quantile directly.
+      # chain_execution is in nanoseconds; convert to seconds for parity with
+      # the histogram-based client queries elsewhere.
+      block_proc_p50: 'chain_execution{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_execution{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_execution{quantile="0.99"} / 1e9'
+      # chain_mgasps is mega-gas per second already; multiply for gas/s.
+      gas_per_sec:    'chain_mgasps{quantile="0.5"} * 1e6'
+
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+    - "disk_throughput_peak_bytes_per_sec"
+    - "disk_iops_peak"
+    - "net_rx_bytes_per_sec_peak"
+
+load_test:
+  run_time: "30s"
+  users: 10
+  spawn_rate: 5
+  recent_block_window: 50
+  # These match the seeded addresses in scripts/seed_test_node.py.
+  addresses:
+    - "0x1111111111111111111111111111111111111111"
+    - "0x2222222222222222222222222222222222222222"
+    - "0x3333333333333333333333333333333333333333"
+    # Contract deployed by scripts/seed_test_node.py. Address depends on the
+    # dev account's nonce when the deploy ran; re-paste from the seeder log
+    # if you bring up a fresh stack.
+    - "0x880ec53af800b5cd051531672ef4fc4de233bd5d"
+  slots:
+    - "0x0"
+    - "0x1"
+  eth_call_shapes:
+    - "0x18160ddd"  # totalSupply()
+    - "0x313ce567"  # decimals()

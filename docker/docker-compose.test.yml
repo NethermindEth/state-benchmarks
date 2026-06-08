@@ -1,0 +1,109 @@
+# Self-contained test stack: Geth in --dev mode + monitoring trio on a shared network.
+# Boots in seconds, produces blocks at 1Hz, exposes Prometheus metrics, supports eth_getProof.
+# Used to smoke-test the benchmark harness end-to-end (see test-config.yml).
+services:
+  test-client:
+    image: ethereum/client-go:latest
+    container_name: benchmark_test-client
+    volumes:
+      - test_client_data:/root/.ethereum
+    ports:
+      - "8545:8545"
+      - "6060:6060"
+    command:
+      - --dev
+      - --dev.period=1
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.api=eth,net,web3,debug,personal
+      - --http.vhosts=*
+      - --http.corsdomain=*
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+      - --rpc.allow-unprotected-txs
+      - --verbosity=2
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: benchmark_prometheus
+    # host-gateway makes host.docker.internal resolve to the host on Linux,
+    # so Prometheus can scrape the Locust exporter (running on the host as a
+    # subprocess of runner.py).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./prometheus.test.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: benchmark_node_exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: benchmark_cadvisor
+    # No `privileged: true` — it fails on rootless Docker (OrbStack Linux VM),
+    # because the userns-mapped container root can't open host device nodes.
+    # `cgroup: host` opts out of the cgroup namespace so cAdvisor can see sibling
+    # docker container cgroups (mandatory on rootless; harmless on Docker Desktop).
+    # On rootless Docker, cAdvisor's docker factory can't resolve the layer DB
+    # (OrbStack uses a custom "overlayfs" storage driver), so it drops the
+    # docker scopes entirely. Mounting /dev/null over the socket disables the
+    # docker factory and lets the systemd factory expose the cgroups with `id`
+    # labels (no `name` enrichment, but the data is there). On Docker Desktop /
+    # rootful Linux, leave DOCKER_SOCK unset to get full `name`-enriched series.
+    #   Rootless: DOCKER_SOCK=/dev/null docker compose up -d
+    cgroup: host
+    volumes:
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: benchmark_grafana
+    depends_on:
+      - prometheus
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/benchmark.json
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  test_client_data:
+  prometheus_data:
+  grafana_data:

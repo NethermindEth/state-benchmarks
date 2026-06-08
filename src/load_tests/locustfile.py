@@ -10,8 +10,37 @@ from typing import List
 import requests
 import yaml
 from locust import FastHttpUser, between, events, task
+from locust.runners import MasterRunner, WorkerRunner
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
 _logger = logging.getLogger("locust.benchmark")
+
+LOCUST_PROMETHEUS_PORT = int(os.environ.get("LOCUST_PROMETHEUS_PORT", "9646"))
+
+# Buckets in milliseconds — JSON-RPC eth_* calls typically land in 1–100ms;
+# extending to 5s covers slow sync / sluggish-client outliers.
+_LATENCY_BUCKETS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000)
+
+LOCUST_REQUESTS = Counter(
+    "locust_requests_total",
+    "Total Locust requests by method, name, and result (success|failure).",
+    ["method", "name", "result"],
+)
+LOCUST_LATENCY = Histogram(
+    "locust_request_latency_ms",
+    "Locust request latency in milliseconds.",
+    ["method", "name"],
+    buckets=_LATENCY_BUCKETS,
+)
+LOCUST_RESPONSE_BYTES = Counter(
+    "locust_response_bytes_total",
+    "Total response bytes received by Locust, by method/name.",
+    ["method", "name"],
+)
+LOCUST_USERS = Gauge("locust_users", "Currently spawned Locust users.")
+LOCUST_TEST_RUNNING = Gauge(
+    "locust_test_running", "1 while a Locust test is running, 0 otherwise."
+)
 
 
 def load_config(path: str = "config.yml"):
@@ -38,6 +67,50 @@ _proof_writer = None
 
 def _random_block_tag() -> str:
     return random.choice(RECENT_BLOCKS)
+
+
+@events.init.add_listener
+def on_locust_init(environment, **kwargs):
+    # Expose Prometheus metrics from the master (or a single-process local run);
+    # workers report into the master, so only one HTTP server is needed.
+    if isinstance(environment.runner, WorkerRunner):
+        return
+    try:
+        start_http_server(LOCUST_PROMETHEUS_PORT)
+        _logger.info(
+            f"Locust Prometheus exporter listening on :{LOCUST_PROMETHEUS_PORT}/metrics"
+        )
+    except OSError as e:
+        # Port already bound — likely a previous run leaked it; keep going so
+        # the load test still produces CSVs even without live metrics.
+        _logger.warning(f"Locust Prometheus exporter failed to bind: {e}")
+
+
+@events.request.add_listener
+def on_request(
+    request_type, name, response_time, response_length, exception, **kwargs
+):
+    result = "failure" if exception else "success"
+    LOCUST_REQUESTS.labels(method=request_type, name=name, result=result).inc()
+    LOCUST_LATENCY.labels(method=request_type, name=name).observe(response_time)
+    if response_length:
+        LOCUST_RESPONSE_BYTES.labels(method=request_type, name=name).inc(
+            response_length
+        )
+
+
+def _user_count_poller(environment):
+    while getattr(environment.runner, "state", None) in (
+        "spawning",
+        "running",
+        "ready",
+    ):
+        try:
+            LOCUST_USERS.set(environment.runner.user_count)
+        except Exception:
+            pass
+        time.sleep(1)
+    LOCUST_USERS.set(0)
 
 
 @events.test_start.add_listener
@@ -69,6 +142,13 @@ def on_test_start(environment, **kwargs):
         _proof_writer = csv.writer(_proof_file)
         _proof_writer.writerow(["timestamp_ms", "address", "block", "response_bytes"])
 
+    LOCUST_TEST_RUNNING.set(1)
+    if not isinstance(environment.runner, WorkerRunner):
+        t = threading.Thread(
+            target=_user_count_poller, args=(environment,), daemon=True
+        )
+        t.start()
+
 
 @events.test_stop.add_listener
 def on_test_stop(environment, **kwargs):
@@ -76,6 +156,8 @@ def on_test_stop(environment, **kwargs):
     if _proof_file:
         _proof_file.close()
         _proof_file = None
+    LOCUST_TEST_RUNNING.set(0)
+    LOCUST_USERS.set(0)
 
 
 class EthereumRPCUser(FastHttpUser):
