@@ -19,11 +19,69 @@ nodes:
 
 metrics:
   prometheus_url: "http://localhost:9090"
+  # Range windows used by {window} substitution in queries.
+  # sync_window covers the sync phase; load_window covers the load-test phase.
+  sync_window: "1h"
+  load_window: "5m"
+
+  # Cross-client container/host queries. {client} -> "benchmark_<client>",
+  # {window} -> sync_window or load_window depending on phase.
   queries:
-    cpu_percent: 'rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[5m]) * 100'
-    rss_bytes: 'container_memory_rss{name="benchmark_{client}"}'
+    cpu_percent_peak:           'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    cpu_percent_sustained:      'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    rss_peak_bytes:             'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes:        'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec:   'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak:  'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    net_rx_bytes_per_sec_avg:   'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    disk_iops_peak:             'max_over_time((rate(container_fs_reads_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time((rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+
+  # Per-client block-processing + gas/s queries. Metric names vary per client.
+  # Verify against each client's /metrics endpoint before relying on the values.
+  # Missing metrics return 0.0 from the aggregator (logged, not fatal).
+  client_queries:
+    nethermind:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(nethermind_blocks_gas_used[{window}])'
+    geth:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(chain_execution_seconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(chain_execution_seconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(chain_execution_seconds_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(chain_head_gas_used[{window}])'
+    besu:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(besu_blockchain_chain_head_gas_used[{window}])'
+    reth:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6'
+    erigon:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(chain_head_gas_used[{window}])'
+
+  # Higher-is-better metrics. The aggregator's regression check flips sign for these.
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+    - "disk_throughput_peak_bytes_per_sec"
+    - "disk_iops_peak"
+    - "net_rx_bytes_per_sec_peak"
+    - "net_rx_bytes_per_sec_avg"
 
 load_test:
+  run_time: "5m"
+  users: 50
+  spawn_rate: 10
+  # How many recent blocks to sample from (calls hit random blocks in [head-N, head]).
+  recent_block_window: 1000
   addresses:
     - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
     - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
@@ -31,3 +89,9 @@ load_test:
     - "0x0"
     - "0x1"
     - "0x2"
+  # Representative read-heavy eth_call shapes (ERC-20 style). Hex calldata only.
+  eth_call_shapes:
+    - "0x18160ddd"  # totalSupply()
+    - "0x313ce567"  # decimals()
+    - "0x95d89b41"  # symbol()
+    - "0x06fdde03"  # name()

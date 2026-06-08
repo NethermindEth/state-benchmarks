@@ -9,3 +9,16 @@ dependencies = [
     "pyyaml>=6.0.3",
     "requests>=2.34.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires Docker; runs the docker/docker-compose.test.yml stack",
+]
+# Default: skip integration tests. Opt in with: uv run pytest -m integration
+addopts = "-m 'not integration'"
