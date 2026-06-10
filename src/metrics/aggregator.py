@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import statistics
+import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
@@ -13,7 +14,7 @@ import yaml
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-REGRESSION_THRESHOLD = 0.25  # 25% spec
+DEFAULT_REGRESSION_THRESHOLD = 0.25  # 25% spec — used when metrics.regression_threshold is absent.
 
 
 def load_config(path: str = "config.yml") -> Dict[str, Any]:
@@ -21,7 +22,12 @@ def load_config(path: str = "config.yml") -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def query_prometheus(prom_url: str, query: str) -> float:
+def query_prometheus(prom_url: str, query: str) -> Optional[float]:
+    """Return the query value, or None when the metric is unavailable.
+
+    None (never 0.0) signals failure: a fabricated zero would be written into
+    the milestone JSON as a real measurement and trip false regressions.
+    """
     try:
         response = requests.get(f"{prom_url}/api/v1/query", params={'query': query}, timeout=10)
         data = response.json()
@@ -30,13 +36,13 @@ def query_prometheus(prom_url: str, query: str) -> float:
             # NaN / +Inf from histogram_quantile show up as strings; coerce safely.
             try:
                 f = float(value)
-                return f if (f == f and f != float('inf') and f != float('-inf')) else 0.0
+                return f if (f == f and f != float('inf') and f != float('-inf')) else None
             except ValueError:
-                return 0.0
-        return 0.0
+                return None
+        return None
     except Exception as e:
         logger.error(f"Prometheus query failed for {query!r}: {e}")
-        return 0.0
+        return None
 
 
 def render_query(template: str, client: str, window: str) -> str:
@@ -51,10 +57,13 @@ def gather_prometheus_metrics(
     window: str,
 ) -> Dict[str, float]:
     metrics: Dict[str, float] = {}
-    for name, query_template in queries.items():
-        metrics[name] = query_prometheus(prom_url, render_query(query_template, client, window))
-    for name, query_template in client_queries.items():
-        metrics[name] = query_prometheus(prom_url, render_query(query_template, client, window))
+    for source in (queries, client_queries):
+        for name, query_template in source.items():
+            value = query_prometheus(prom_url, render_query(query_template, client, window))
+            if value is None:
+                logger.warning(f"Metric {name!r} unavailable (query failed or returned no data); omitting.")
+                continue
+            metrics[name] = value
     return metrics
 
 
@@ -168,35 +177,52 @@ def compare_against_previous(
     current: Dict[str, float],
     prev: Dict[str, Any],
     higher_is_better: Set[str],
-):
+    regression_threshold: float = DEFAULT_REGRESSION_THRESHOLD,
+) -> List[Dict[str, Any]]:
+    """Compare current metrics with a prior milestone; return the list of regressions."""
+    regressions: List[Dict[str, Any]] = []
     prev_milestone = prev.get("milestone", "<unknown>")
     prev_metrics = prev.get("payload", {}).get("metrics", {})
     if not prev_metrics:
         logger.info(f"Previous milestone {prev_milestone} has no metrics block; skipping comparison.")
-        return
+        return regressions
 
     logger.info(f"Comparing against previous milestone: {prev_milestone}")
     for key, curr_val in current.items():
         if key not in prev_metrics:
             continue
         prev_val = prev_metrics[key]
-        if not isinstance(prev_val, (int, float)) or prev_val == 0:
+        if not isinstance(curr_val, (int, float)) or not isinstance(prev_val, (int, float)) or prev_val == 0:
             continue
         delta = (curr_val - prev_val) / prev_val
         # For higher-is-better metrics, a decrease is a regression.
-        regressed = (delta < -REGRESSION_THRESHOLD) if key in higher_is_better else (delta > REGRESSION_THRESHOLD)
+        regressed = (delta < -regression_threshold) if key in higher_is_better else (delta > regression_threshold)
         if regressed:
             logger.warning(
                 f"REGRESSION DETECTED! {key}: {prev_val} -> {curr_val} ({delta*100:+.2f}%)"
             )
+            regressions.append({
+                "metric": key,
+                "previous_milestone": prev_milestone,
+                "previous": prev_val,
+                "current": curr_val,
+                "delta_pct": round(delta * 100, 2),
+            })
         else:
             logger.info(f"{key}: {prev_val} -> {curr_val} ({delta*100:+.2f}%)")
+    return regressions
 
 
 def write_csv_summary(csv_path: str, client: str, state_size: Optional[int], metrics: Dict[str, Any]):
     """Flat per-metric CSV — the schema the spec asks for."""
     rows = []
+    # Proof percentiles get a dedicated percentile row below; skip their flat
+    # duplicates (which would land in the 'mean' column and confuse readers).
+    proof = metrics.get("proof_sizes")
+    skip = {"proof_p50_bytes", "proof_p95_bytes", "proof_p99_bytes"} if isinstance(proof, dict) and proof else set()
     for name, value in metrics.items():
+        if name in skip:
+            continue
         if isinstance(value, (int, float)):
             rows.append({
                 "client": client,
@@ -220,7 +246,6 @@ def write_csv_summary(csv_path: str, client: str, state_size: Optional[int], met
             "mean": stats.get("mean_ms", ""),
         })
     # Proof size percentiles if present.
-    proof = metrics.get("proof_sizes")
     if isinstance(proof, dict) and proof:
         rows.append({
             "client": client,
@@ -238,11 +263,37 @@ def write_csv_summary(csv_path: str, client: str, state_size: Optional[int], met
         writer.writerows(rows)
 
 
+def sync_phase_path(milestone_dir: str, client: str) -> str:
+    return os.path.join(milestone_dir, f"sync_phase_metrics_{client}.json")
+
+
+def run_sync_phase(client: str, milestone_dir: str, prom_url: str,
+                   cross_queries: Dict[str, str], client_queries: Dict[str, str],
+                   sync_window: str):
+    """Capture system metrics right after sync, while the window still covers it."""
+    metrics = gather_prometheus_metrics(client, prom_url, cross_queries, client_queries, sync_window)
+    path = sync_phase_path(milestone_dir, client)
+    with open(path, 'w') as f:
+        json.dump({
+            "client": client,
+            "window": sync_window,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": metrics,
+        }, f, indent=2)
+    logger.info(f"Saved sync-phase metrics to {path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Metrics Aggregator")
     parser.add_argument("--config", type=str, default="config.yml")
     parser.add_argument("--client", type=str, required=True)
     parser.add_argument("--milestone", type=str, required=True)
+    parser.add_argument("--phase", choices=["sync", "load"], default="load",
+                        help="'sync': snapshot sync-phase Prometheus metrics only (run right after "
+                             "sync completes). 'load' (default): full aggregation; merges a prior "
+                             "sync-phase snapshot if present.")
+    parser.add_argument("--fail-on-regression", action="store_true",
+                        help="Exit with status 2 if any metric regressed vs the previous milestone.")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -251,14 +302,31 @@ def main():
     cross_queries = metrics_cfg.get("queries", {})
     client_queries = metrics_cfg.get("client_queries", {}).get(args.client, {})
     load_window = metrics_cfg.get("load_window", "5m")
+    sync_window = metrics_cfg.get("sync_window", "1h")
     higher_is_better = set(metrics_cfg.get("higher_is_better", []))
+    regression_threshold = float(metrics_cfg.get("regression_threshold", DEFAULT_REGRESSION_THRESHOLD))
 
     milestone_dir = os.path.join("benchmarks", args.milestone)
     os.makedirs(milestone_dir, exist_ok=True)
     client_dir = os.path.join(milestone_dir, args.client)
 
+    if args.phase == "sync":
+        run_sync_phase(args.client, milestone_dir, prom_url, cross_queries, client_queries, sync_window)
+        return
+
     # 1. Prometheus metrics over the load window.
     flat_metrics = gather_prometheus_metrics(args.client, prom_url, cross_queries, client_queries, load_window)
+
+    # 1b. Sync-phase snapshot (written by --phase sync right after sync ended).
+    sync_phase_file = sync_phase_path(milestone_dir, args.client)
+    if os.path.exists(sync_phase_file):
+        try:
+            with open(sync_phase_file) as f:
+                sync_phase = json.load(f)
+            for name, value in sync_phase.get("metrics", {}).items():
+                flat_metrics[f"sync_{name}"] = value
+        except Exception as e:
+            logger.warning(f"Could not read {sync_phase_file}: {e}")
 
     # 2. Runner-supplied sync/db measurements.
     sync = load_sync_metrics(milestone_dir, args.client)
@@ -284,7 +352,15 @@ def main():
         flat_metrics["proof_p95_bytes"] = proof["p95_bytes"]
         flat_metrics["proof_p99_bytes"] = proof["p99_bytes"]
 
-    # 5. Assemble output payload.
+    # 5. Cross-milestone regression check (before writing, so the result is persisted).
+    regressions: List[Dict[str, Any]] = []
+    prev = find_previous_milestone(args.client, milestone_dir)
+    if prev is None:
+        logger.info("No previous milestones found for comparison.")
+    else:
+        regressions = compare_against_previous(flat_metrics, prev, higher_is_better, regression_threshold)
+
+    # 6. Assemble output payload.
     payload = {
         "client": args.client,
         "milestone": args.milestone,
@@ -293,6 +369,7 @@ def main():
         "metrics": flat_metrics,
         "rpc": rpc,
         "proof_sizes": proof,
+        "regressions": regressions,
     }
 
     json_path = os.path.join(milestone_dir, f"metrics_{args.client}.json")
@@ -304,12 +381,9 @@ def main():
     write_csv_summary(csv_path, args.client, state_size, {**payload["metrics"], "rpc": rpc, "proof_sizes": proof})
     logger.info(f"Saved CSV summary to {csv_path}")
 
-    # 6. Cross-milestone regression check.
-    prev = find_previous_milestone(args.client, milestone_dir)
-    if prev is None:
-        logger.info("No previous milestones found for comparison.")
-    else:
-        compare_against_previous(flat_metrics, prev, higher_is_better)
+    if regressions and args.fail_on_regression:
+        logger.error(f"{len(regressions)} regression(s) detected; exiting non-zero (--fail-on-regression).")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,10 @@
 # Benchmarks Artifacts
 benchmarks/
 
+# Local environment overrides (committed: .env.example)
+.env
+.env.local
+
 # Virtual Environments
 .venv/
 venv/
@@ -46,3 +50,6 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+
+# Test caches
+.pytest_cache/

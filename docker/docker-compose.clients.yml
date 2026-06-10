@@ -1,92 +1,205 @@
-version: '3.8'
+# Note: The orchestrator script will selectively start one client at a time using
+# `docker compose up <client_name>` (plus its matching lighthouse-<client_name>
+# consensus client when nodes.consensus is enabled in the config — post-merge,
+# no EL client syncs mainnet without a CL driving its engine API).
+#
+# All published ports bind to ${BIND_ADDR:-127.0.0.1}; set BIND_ADDR=0.0.0.0 to
+# expose them beyond the host (NOT recommended on shared/public machines).
+#
+# docker/jwtsecret is a committed, local-only shared secret authenticating the
+# EL<->CL engine API between these containers. Regenerate with:
+#   openssl rand -hex 32 > docker/jwtsecret
 
-# Note: The orchestrator script will selectively start one client at a time using `docker-compose up <client_name>`
+# Distinct project name so clients group separately from the monitoring stack
+# in Docker Desktop/OrbStack (default would be "docker" — the file's dir name).
+name: benchmark-clients
+
+# Shared named network: the monitoring stack joins the same one so Prometheus
+# can scrape client containers by service name (nethermind:6060, geth:6060, …).
+networks:
+  default:
+    name: benchmark_net
+
 services:
   nethermind:
-    image: nethermind/nethermind:latest
+    image: ${NETHERMIND_IMAGE:-nethermind/nethermind:latest}
     container_name: benchmark_nethermind
     volumes:
       - nethermind_data:/nethermind/data
+      - ./jwtsecret:/jwt/jwtsecret:ro
     ports:
-      - 8545:8545
-      - 8551:8551
-      - 6060:6060 # Metrics
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${NETHERMIND_METRICS_PORT:-6060}:6060" # Metrics
     command:
-      - --config=mainnet
+      - --config=${ETH_NETWORK:-mainnet}
       - --JsonRpc.Enabled=true
       - --JsonRpc.Host=0.0.0.0
+      - --JsonRpc.EngineHost=0.0.0.0
+      - --JsonRpc.EnginePort=8551
+      - --JsonRpc.JwtSecretFile=/jwt/jwtsecret
       - --Metrics.Enabled=true
       - --Metrics.ExposePort=6060
       - --Sync.SnapSync=true
 
   geth:
-    image: ethereum/client-go:latest
+    image: ${GETH_IMAGE:-ethereum/client-go:latest}
     container_name: benchmark_geth
     volumes:
       - geth_data:/root/.ethereum
+      - ./jwtsecret:/jwt/jwtsecret:ro
     ports:
-      - 8545:8545
-      - 8551:8551
-      - 6060:6060
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${GETH_METRICS_PORT:-6060}:6060"
     command:
       - --http
       - --http.addr=0.0.0.0
       - --http.api=eth,net,web3
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=*
+      - --authrpc.jwtsecret=/jwt/jwtsecret
       - --metrics
       - --metrics.addr=0.0.0.0
       - --metrics.port=6060
+      - --${ETH_NETWORK:-mainnet}
       - --syncmode=snap
 
   besu:
-    image: hyperledger/besu:latest
+    image: ${BESU_IMAGE:-hyperledger/besu:latest}
     container_name: benchmark_besu
     volumes:
       - besu_data:/opt/besu/data
+      - ./jwtsecret:/jwt/jwtsecret:ro
     ports:
-      - 8545:8545
-      - 8551:8551
-      - 9545:9545 # Metrics
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${BESU_METRICS_PORT:-9545}:9545" # Metrics
     command:
-      - --network=mainnet
+      - --network=${ETH_NETWORK:-mainnet}
       - --rpc-http-enabled
       - --rpc-http-host=0.0.0.0
       - --rpc-http-api=ETH,NET,WEB3
+      - --engine-rpc-enabled
+      - --engine-rpc-port=8551
+      - --engine-host-allowlist=*
+      - --engine-jwt-secret=/jwt/jwtsecret
       - --metrics-enabled
       - --metrics-host=0.0.0.0
       - --sync-mode=SNAP
 
   reth:
-    image: ghcr.io/paradigmxyz/reth:latest
+    image: ${RETH_IMAGE:-ghcr.io/paradigmxyz/reth:latest}
     container_name: benchmark_reth
     volumes:
-      - reth_data:/root/.local/share/reth/mainnet
+      # Parent dir, not .../reth/<network>: reth picks the subdir per network.
+      - reth_data:/root/.local/share/reth
+      - ./jwtsecret:/jwt/jwtsecret:ro
     ports:
-      - 8545:8545
-      - 8551:8551
-      - 9001:9001 # Metrics
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${RETH_METRICS_PORT:-9001}:9001" # Metrics
     command:
       - node
-      - --chain=mainnet
+      - --chain=${ETH_NETWORK:-mainnet}
       - --http
       - --http.addr=0.0.0.0
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/jwt/jwtsecret
       - --metrics=0.0.0.0:9001
 
   erigon:
-    image: erigontech/erigon:latest
+    image: ${ERIGON_IMAGE:-erigontech/erigon:latest}
     container_name: benchmark_erigon
     volumes:
       - erigon_data:/home/erigon/.local/share/erigon
+      - ./jwtsecret:/jwt/jwtsecret:ro
     ports:
-      - 8545:8545
-      - 8551:8551
-      - 6060:6060
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${ERIGON_METRICS_PORT:-6060}:6060"
     command:
-      - --chain=mainnet
+      - --chain=${ETH_NETWORK:-mainnet}
       - --http
       - --http.addr=0.0.0.0
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=*
+      - --authrpc.jwtsecret=/jwt/jwtsecret
       - --metrics
       - --metrics.addr=0.0.0.0
       - --metrics.port=6060
+
+  # --- Consensus clients -----------------------------------------------------
+  # One Lighthouse beacon node per EL client (only the matching one is started
+  # by the orchestrator). They share a beacon DB volume — only one runs at a
+  # time, and the beacon chain state is EL-independent, so checkpoint-synced
+  # state is reused across clients. P2P port 9000 deliberately binds all
+  # interfaces (inbound peers help sync); everything else stays local.
+
+  lighthouse-nethermind:
+    <<: &lighthouse-common
+      image: ${LIGHTHOUSE_IMAGE:-sigp/lighthouse:latest}
+      volumes:
+        - lighthouse_data:/root/.lighthouse
+        - ./jwtsecret:/jwt/jwtsecret:ro
+      ports:
+        - "${LIGHTHOUSE_P2P_PORT:-9000}:9000/tcp"
+        - "${LIGHTHOUSE_P2P_PORT:-9000}:9000/udp"
+    container_name: benchmark_lighthouse-nethermind
+    command:
+      - lighthouse
+      - bn
+      - --network=${ETH_NETWORK:-mainnet}
+      - --execution-endpoint=http://nethermind:8551
+      - --execution-jwt=/jwt/jwtsecret
+      - --checkpoint-sync-url=${CHECKPOINT_SYNC_URL:-https://beaconstate.info}
+
+  lighthouse-geth:
+    <<: *lighthouse-common
+    container_name: benchmark_lighthouse-geth
+    command:
+      - lighthouse
+      - bn
+      - --network=${ETH_NETWORK:-mainnet}
+      - --execution-endpoint=http://geth:8551
+      - --execution-jwt=/jwt/jwtsecret
+      - --checkpoint-sync-url=${CHECKPOINT_SYNC_URL:-https://beaconstate.info}
+
+  lighthouse-besu:
+    <<: *lighthouse-common
+    container_name: benchmark_lighthouse-besu
+    command:
+      - lighthouse
+      - bn
+      - --network=${ETH_NETWORK:-mainnet}
+      - --execution-endpoint=http://besu:8551
+      - --execution-jwt=/jwt/jwtsecret
+      - --checkpoint-sync-url=${CHECKPOINT_SYNC_URL:-https://beaconstate.info}
+
+  lighthouse-reth:
+    <<: *lighthouse-common
+    container_name: benchmark_lighthouse-reth
+    command:
+      - lighthouse
+      - bn
+      - --network=${ETH_NETWORK:-mainnet}
+      - --execution-endpoint=http://reth:8551
+      - --execution-jwt=/jwt/jwtsecret
+      - --checkpoint-sync-url=${CHECKPOINT_SYNC_URL:-https://beaconstate.info}
+
+  lighthouse-erigon:
+    <<: *lighthouse-common
+    container_name: benchmark_lighthouse-erigon
+    command:
+      - lighthouse
+      - bn
+      - --network=${ETH_NETWORK:-mainnet}
+      - --execution-endpoint=http://erigon:8551
+      - --execution-jwt=/jwt/jwtsecret
+      - --checkpoint-sync-url=${CHECKPOINT_SYNC_URL:-https://beaconstate.info}
 
 volumes:
   nethermind_data:
@@ -94,3 +207,4 @@ volumes:
   besu_data:
   reth_data:
   erigon_data:
+  lighthouse_data:

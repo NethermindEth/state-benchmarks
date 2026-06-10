@@ -43,6 +43,7 @@ metrics:
       # chain_mgasps is mega-gas per second already; multiply for gas/s.
       gas_per_sec:    'chain_mgasps{quantile="0.5"} * 1e6'
 
+  regression_threshold: 0.25
   higher_is_better:
     - "rpc_requests_sec"
     - "gas_per_sec"
@@ -54,6 +55,16 @@ load_test:
   run_time: "30s"
   users: 10
   spawn_rate: 5
+  wait_time:
+    min: 0.1
+    max: 0.5
+  task_weights:
+    eth_getBalance: 3
+    eth_getStorageAt: 3
+    eth_call: 2
+    eth_getCode: 2
+    eth_getProof: 1
+  latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
   recent_block_window: 50
   # These match the seeded addresses in scripts/seed_test_node.py.
   addresses:

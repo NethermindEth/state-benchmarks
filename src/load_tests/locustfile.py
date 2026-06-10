@@ -9,7 +9,7 @@ from typing import List
 
 import requests
 import yaml
-from locust import FastHttpUser, between, events, task
+from locust import FastHttpUser, between, events
 from locust.runners import MasterRunner, WorkerRunner
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
@@ -17,20 +17,14 @@ _logger = logging.getLogger("locust.benchmark")
 
 LOCUST_PROMETHEUS_PORT = int(os.environ.get("LOCUST_PROMETHEUS_PORT", "9646"))
 
-# Buckets in milliseconds — JSON-RPC eth_* calls typically land in 1–100ms;
+# Defaults in milliseconds — JSON-RPC eth_* calls typically land in 1–100ms;
 # extending to 5s covers slow sync / sluggish-client outliers.
-_LATENCY_BUCKETS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000)
+_DEFAULT_LATENCY_BUCKETS = (1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000)
 
 LOCUST_REQUESTS = Counter(
     "locust_requests_total",
     "Total Locust requests by method, name, and result (success|failure).",
     ["method", "name", "result"],
-)
-LOCUST_LATENCY = Histogram(
-    "locust_request_latency_ms",
-    "Locust request latency in milliseconds.",
-    ["method", "name"],
-    buckets=_LATENCY_BUCKETS,
 )
 LOCUST_RESPONSE_BYTES = Counter(
     "locust_response_bytes_total",
@@ -44,25 +38,60 @@ LOCUST_TEST_RUNNING = Gauge(
 
 
 def load_config(path: str = "config.yml"):
-    with open(path, 'r') as f:
-        return yaml.safe_load(f)
+    try:
+        with open(path, 'r') as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        raise SystemExit(
+            f"Locust benchmark config not found at {path!r}. "
+            "Set the LOCUST_CONFIG environment variable to a valid config file "
+            "(e.g. config.yml or test-config.yml), or run from the repo root."
+        )
 
 
 CONFIG = load_config(os.environ.get("LOCUST_CONFIG", "config.yml"))
 LOAD_CFG = CONFIG.get("load_test", {})
 ADDRESSES: List[str] = LOAD_CFG.get("addresses", ["0x0000000000000000000000000000000000000000"])
+# Extra runtime-discovered targets (e.g. the contract deployed by
+# scripts/seed_test_node.py, injected by the runner) — comma-separated.
+_extra_addresses = [
+    a.strip() for a in os.environ.get("LOCUST_EXTRA_ADDRESSES", "").split(",") if a.strip()
+]
+for _addr in _extra_addresses:
+    if _addr.lower() not in (a.lower() for a in ADDRESSES):
+        ADDRESSES.append(_addr)
 SLOTS: List[str] = LOAD_CFG.get("slots", ["0x0"])
 ETH_CALL_SHAPES: List[str] = LOAD_CFG.get("eth_call_shapes", ["0x18160ddd"])
 RECENT_BLOCK_WINDOW: int = int(LOAD_CFG.get("recent_block_window", 1000))
+LATENCY_BUCKETS = tuple(LOAD_CFG.get("latency_buckets", _DEFAULT_LATENCY_BUCKETS))
+_WAIT_CFG = LOAD_CFG.get("wait_time", {"min": 0.1, "max": 0.5})
+WAIT_MIN: float = float(_WAIT_CFG.get("min", 0.1))
+WAIT_MAX: float = float(_WAIT_CFG.get("max", 0.5))
+TASK_WEIGHTS = LOAD_CFG.get("task_weights", {
+    "eth_getBalance": 3,
+    "eth_getStorageAt": 3,
+    "eth_call": 2,
+    "eth_getCode": 2,
+    "eth_getProof": 1,
+})
+
+LOCUST_LATENCY = Histogram(
+    "locust_request_latency_ms",
+    "Locust request latency in milliseconds.",
+    ["method", "name"],
+    buckets=LATENCY_BUCKETS,
+)
 
 # Populated in on_test_start. Defaults keep the harness usable even if the
 # RPC bootstrap fails (e.g., dry runs against a stub).
 RECENT_BLOCKS: List[str] = ["latest"]
 
 PROOF_SIZES_CSV = os.environ.get("LOCUST_PROOF_SIZES_CSV")
+_PROOF_FLUSH_EVERY = 100  # rows between flushes, so a crash loses at most this many samples
 _proof_lock = threading.Lock()
 _proof_file = None
 _proof_writer = None
+_proof_rows_since_flush = 0
 
 
 def _random_block_tag() -> str:
@@ -71,10 +100,16 @@ def _random_block_tag() -> str:
 
 @events.init.add_listener
 def on_locust_init(environment, **kwargs):
-    # Expose Prometheus metrics from the master (or a single-process local run);
-    # workers report into the master, so only one HTTP server is needed.
-    if isinstance(environment.runner, WorkerRunner):
-        return
+    # Distributed master/worker mode is unsupported: the Prometheus counters and
+    # the proof-size CSV are process-local, so workers would record into state
+    # that is never exported (master serves /metrics with all-zero counters) and
+    # all workers would interleave writes into the same CSV file.
+    if isinstance(environment.runner, (MasterRunner, WorkerRunner)):
+        raise RuntimeError(
+            "locustfile.py does not support distributed master/worker mode: "
+            "Prometheus metrics and the proof-size CSV are process-local. "
+            "Run single-process (--headless without --master/--worker)."
+        )
     try:
         start_http_server(LOCUST_PROMETHEUS_PORT)
         _logger.info(
@@ -138,30 +173,34 @@ def on_test_start(environment, **kwargs):
 
     if PROOF_SIZES_CSV:
         os.makedirs(os.path.dirname(PROOF_SIZES_CSV) or ".", exist_ok=True)
-        _proof_file = open(PROOF_SIZES_CSV, 'w', newline='')
-        _proof_writer = csv.writer(_proof_file)
-        _proof_writer.writerow(["timestamp_ms", "address", "block", "response_bytes"])
+        with _proof_lock:
+            _proof_file = open(PROOF_SIZES_CSV, 'w', newline='')
+            _proof_writer = csv.writer(_proof_file)
+            _proof_writer.writerow(["timestamp_ms", "address", "block", "response_bytes"])
 
     LOCUST_TEST_RUNNING.set(1)
-    if not isinstance(environment.runner, WorkerRunner):
-        t = threading.Thread(
-            target=_user_count_poller, args=(environment,), daemon=True
-        )
-        t.start()
+    t = threading.Thread(
+        target=_user_count_poller, args=(environment,), daemon=True
+    )
+    t.start()
 
 
 @events.test_stop.add_listener
 def on_test_stop(environment, **kwargs):
-    global _proof_file
-    if _proof_file:
-        _proof_file.close()
-        _proof_file = None
+    global _proof_file, _proof_writer
+    # Clear the writer under the lock BEFORE closing the file so a straggling
+    # eth_getProof greenlet can't write to a closed file.
+    with _proof_lock:
+        _proof_writer = None
+        if _proof_file:
+            _proof_file.close()
+            _proof_file = None
     LOCUST_TEST_RUNNING.set(0)
     LOCUST_USERS.set(0)
 
 
 class EthereumRPCUser(FastHttpUser):
-    wait_time = between(0.1, 0.5)
+    wait_time = between(WAIT_MIN, WAIT_MAX)
 
     def rpc_call(self, method, params, name=None):
         payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
@@ -181,35 +220,47 @@ class EthereumRPCUser(FastHttpUser):
             response.success()
             return response
 
-    @task(3)
     def eth_get_balance(self):
         self.rpc_call("eth_getBalance", [random.choice(ADDRESSES), _random_block_tag()])
 
-    @task(3)
     def eth_get_storage_at(self):
         self.rpc_call(
             "eth_getStorageAt",
             [random.choice(ADDRESSES), random.choice(SLOTS), _random_block_tag()],
         )
 
-    @task(2)
     def eth_get_code(self):
         self.rpc_call("eth_getCode", [random.choice(ADDRESSES), _random_block_tag()])
 
-    @task(2)
     def eth_call(self):
         address = random.choice(ADDRESSES)
         data = random.choice(ETH_CALL_SHAPES)
         self.rpc_call("eth_call", [{"to": address, "data": data}, _random_block_tag()])
 
-    @task(1)
     def eth_get_proof(self):
+        global _proof_rows_since_flush
         address = random.choice(ADDRESSES)
         block = _random_block_tag()
         slots = [random.choice(SLOTS)]
         response = self.rpc_call("eth_getProof", [address, slots, block], name="eth_getProof")
-        if response is not None and _proof_writer is not None:
+        if response is not None:
             size = len(response.content)
-            # Locust runs in greenlets but multiple users share the writer; lock.
+            # Multiple users share the writer, and test_stop may clear it
+            # concurrently — re-check under the lock.
             with _proof_lock:
+                if _proof_writer is None:
+                    return
                 _proof_writer.writerow([int(time.time() * 1000), address, block, size])
+                _proof_rows_since_flush += 1
+                if _proof_rows_since_flush >= _PROOF_FLUSH_EVERY:
+                    _proof_file.flush()
+                    _proof_rows_since_flush = 0
+
+    # Weights driven by load_test.task_weights in the YAML config.
+    tasks = {
+        eth_get_balance:    TASK_WEIGHTS.get("eth_getBalance", 3),
+        eth_get_storage_at: TASK_WEIGHTS.get("eth_getStorageAt", 3),
+        eth_get_code:       TASK_WEIGHTS.get("eth_getCode", 2),
+        eth_call:           TASK_WEIGHTS.get("eth_call", 2),
+        eth_get_proof:      TASK_WEIGHTS.get("eth_getProof", 1),
+    }

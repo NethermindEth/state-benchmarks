@@ -4,7 +4,7 @@ A configuration-driven harness for benchmarking Ethereum execution clients (Neth
 
 ## Architecture Overview
 
-*   **Orchestrator (`src/orchestrator/runner.py`)**: Manages docker-compose lifecycle (auto-detects v1 vs v2 plugin), polls `eth_syncing` to capture sync wall time, measures final on-disk DB size, then triggers the load test and aggregator. Leaves the stack running after the benchmark by default; pass `--stop-monitoring` to tear it down.
+*   **Orchestrator (`src/orchestrator/runner.py`)**: Manages docker-compose lifecycle (auto-detects v1 vs v2 plugin), measures sync wall time (requires `eth_syncing` to be false *and* a fresh chain head over several consecutive polls — clients report "not syncing" before sync starts, so a bare `eth_syncing` poll lies), snapshots sync-phase Prometheus metrics right after sync, measures on-disk DB size, then triggers the load test and aggregator. A failing client doesn't abort the rest of the client list. Leaves the stack running after the benchmark by default; pass `--stop-monitoring` to tear it down.
 *   **Load Generator (`src/load_tests/locustfile.py`)**: `FastHttpUser` workload covering `eth_getBalance`, `eth_getStorageAt`, `eth_call` (multiple shapes), `eth_getCode`, `eth_getProof`. Samples random recent blocks (configurable window) to avoid hitting the same tip block on every call. Captures `eth_getProof` response sizes to a per-run CSV. Exposes a Prometheus `/metrics` endpoint on port 9646 (requests, latency histograms, active users, failures) that Prometheus scrapes live while the load test runs.
 *   **Metrics Aggregator (`src/metrics/aggregator.py`)**: Queries Prometheus for peak / sustained CPU, RSS, RSS growth, network RX, disk IOPS, disk throughput, plus per-client block-processing p50/p95/p99 and gas/s. Parses Locust stats and proof-size CSV. Emits JSON + flat CSV per client. Compares against the most recent prior milestone for the same client, with a per-metric direction map (higher-is-better metrics flip the regression check).
 *   **Monitoring Stack (`docker/`)**: Prometheus + cAdvisor + node_exporter + Grafana. Grafana is anonymous-viewer enabled at `http://localhost:3000` and auto-loads the `Benchmark` dashboard (Resources / Client / Host / Locust rows) — no login or manual import.
@@ -15,6 +15,16 @@ See [`docs/architecture.md`](docs/architecture.md) for the phase-by-phase workfl
 
 *   [**uv**](https://github.com/astral-sh/uv) — fast Python package installer.
 *   **Docker** + **Docker Compose** (v1 or v2 plugin).
+
+### Consensus client (required for mainnet sync)
+
+Post-merge, no execution client syncs mainnet on its own — a consensus client must drive
+its engine API. `docker/docker-compose.clients.yml` ships a `lighthouse-<client>` beacon
+node per EL client (checkpoint-synced, shared `docker/jwtsecret` for engine-API auth);
+the orchestrator starts the matching one automatically when `nodes.consensus: true`
+(the default in `config.yml`). Set it to `false` for pre-synced or externally-driven
+nodes. `docker/jwtsecret` is a committed local-only secret — regenerate with
+`openssl rand -hex 32 > docker/jwtsecret` if you expose any of these ports.
 
 ## Setup
 
@@ -79,6 +89,29 @@ load_test:
 
 **Note:** Per-client `client_queries` metric names should be verified against each client's `/metrics` endpoint — they differ across clients and versions. Missing metrics return `0.0` (logged, not fatal) so the harness keeps running.
 
+### Ports & images: `.env`
+
+Host port mappings, image tags, and Grafana admin credentials live in `.env.example`. Copy it once and edit only the values you need to override:
+
+```bash
+cp .env.example .env
+# IMPORTANT: --env-file is required. Compose resolves the default .env next to
+# the compose file (docker/), so a repo-root .env would be silently ignored.
+docker compose --env-file .env -f docker/docker-compose.monitoring.yml up -d
+```
+
+The orchestrator adds `--env-file .env` automatically whenever a repo-root `.env` exists, so `runner.py` always honors it. (Don't use `--project-directory .` for this — it would also re-root the compose files' relative volume mounts away from `docker/`.)
+
+Three `.env` variables go beyond ports/images:
+
+* `ETH_NETWORK` — network for the whole client stack (EL chain flags **and** Lighthouse), e.g. `sepolia`. Defaults to `mainnet` in the compose file; `.env.example` ships `sepolia` for cheap real-sync runs.
+* `CHECKPOINT_SYNC_URL` — Lighthouse checkpoint-sync endpoint; must match `ETH_NETWORK` (e.g. `https://sepolia.beaconstate.info` for sepolia).
+* `CONSENSUS` — read by `runner.py` (not compose): overrides `nodes.consensus` from the config, i.e. whether the matching `lighthouse-<client>` beacon node is started alongside the EL client. Set `CONSENSUS=false` for pre-synced or externally-driven nodes.
+
+Every variable uses `${VAR:-default}` in the compose files, so an unset value keeps today's defaults. **All published ports bind to `127.0.0.1` by default** — set `BIND_ADDR=0.0.0.0` in `.env` to expose JSON-RPC / Prometheus / Grafana beyond the host (don't do this on shared or public machines: anonymous Grafana, default admin credentials, and an open execution-client RPC are not safe to expose). Container names (`benchmark_*`), volume names, chain selection, and Grafana auth/theme flags stay hardcoded — edit the compose files directly if you need to change them.
+
+**Coupling caveat:** Changing `LOCUST_PROMETHEUS_PORT` requires editing `docker/prometheus.yml` and `docker/prometheus.test.yml` in lock-step — Prometheus YAML does not support env interpolation.
+
 ### Notes on metric sources
 
 * **Geth** exposes metrics in go-metrics summary format with `{quantile="…"}` labels — *not* Prometheus histograms (`*_bucket`). Query the quantile directly: `chain_execution{quantile="0.95"} / 1e9` (the raw value is in nanoseconds). `histogram_quantile()` will return empty against Geth. See `test-config.yml` for a working example.
@@ -93,8 +126,12 @@ Three configs ship in the repo: `config.yml` (local docker-managed real clients)
 # One client, one milestone
 uv run python src/orchestrator/runner.py --client nethermind --milestone v1.0.0
 
-# Skip sync (reuses sync_metrics_<client>.json from a previous run if present)
+# Skip sync (reuses sync_time from a previous sync_metrics_<client>.json if present;
+# DB size is always measured fresh)
 uv run python src/orchestrator/runner.py --client geth --milestone v1.0.0 --skip-sync
+
+# CI mode: exit non-zero when a metric regresses >25% vs the previous milestone
+uv run python src/orchestrator/runner.py --client geth --milestone v1.1.0 --skip-sync --fail-on-regression
 
 # Tear down the stack at the end of the run (default is to leave it up so
 # Grafana / Prometheus stay reachable for post-mortem inspection)
@@ -113,6 +150,7 @@ uv run python src/orchestrator/runner.py --milestone all-clients-baseline
 benchmarks/
 └── v1.0.0/
     ├── sync_metrics_nethermind.json      # sync_time_sec + db_size_bytes
+    ├── sync_phase_metrics_nethermind.json # Prometheus snapshot over sync_window (taken right after sync)
     ├── metrics_nethermind.json           # full structured output
     ├── metrics_nethermind.csv            # flat per-metric CSV
     └── nethermind/
@@ -133,6 +171,8 @@ benchmarks/
   "state_size_bytes": 612000000000,
   "metrics": {
     "sync_time_sec": 28734.5,
+    "sync_cpu_percent_peak": 412.7,
+    "sync_rss_peak_bytes": 21000000000,
     "cpu_percent_peak": 380.2,
     "cpu_percent_sustained": 145.2,
     "rss_peak_bytes": 18450000000,
@@ -154,19 +194,33 @@ benchmarks/
     "proof_p99_bytes": 24000
   },
   "rpc": { "per_method": { "eth_getBalance": { "p50_ms": ..., ... }, ... } },
-  "proof_sizes": { "p50_bytes": ..., "sample_count": 1234 }
+  "proof_sizes": { "p50_bytes": ..., "sample_count": 1234 },
+  "regressions": [
+    { "metric": "rpc_p95_latency_ms", "previous_milestone": "v0.9.0",
+      "previous": 45.0, "current": 61.0, "delta_pct": 35.56 }
+  ]
 }
 ```
 
+Metrics that can't be measured (Prometheus down, query returns no data, `histogram_quantile` yields NaN) are **omitted**, never recorded as `0.0` — a fabricated zero would poison baselines and trip false regressions. `sync_time_sec` is `null` when the node never actually reported syncing (already synced when the measurement started).
+
 ## Regression Detection
 
-The aggregator walks sibling directories under `benchmarks/`, finds the most recent prior `metrics_<client>.json` for the same client (by `timestamp` field), and compares each metric. Higher-is-better metrics (configured via `metrics.higher_is_better`) flip the direction check. When a metric degrades by more than 25% in the bad direction, a `[WARNING] REGRESSION DETECTED!` is logged.
+The aggregator walks sibling directories under `benchmarks/`, finds the most recent prior `metrics_<client>.json` for the same client (by `timestamp` field), and compares each metric. Higher-is-better metrics (configured via `metrics.higher_is_better`) flip the direction check. When a metric degrades by more than 25% in the bad direction, a `[WARNING] REGRESSION DETECTED!` is logged and the regression is recorded in the output JSON's `regressions` array. Pass `--fail-on-regression` (runner or aggregator) to exit non-zero in that case — useful as a CI gate.
 
 ## Quick Local Test
 
 A self-contained docker-compose stack runs Geth in `--dev` mode (1 block/sec) alongside Prometheus + cAdvisor + node_exporter + Grafana on a shared network. Boots in seconds; lets you exercise every code path in the harness without doing a real mainnet sync, and gives you a live Grafana dashboard.
 
 ```bash
+# 0. If a real-client benchmark ran before, tear its stack down first — the runner
+#    leaves it up by default and the client still holds port 8545:
+#      docker compose -f docker/docker-compose.clients.yml down
+#      docker compose -f docker/docker-compose.monitoring.yml down
+#    (Leftovers from versions before the compose projects were renamed don't
+#    respond to compose down; remove them once with:
+#      docker ps -aq --filter name=benchmark_ | xargs docker rm -f)
+
 # 1. Bring up the test stack (Geth --dev + Prometheus + cAdvisor + node_exporter + Grafana).
 docker compose -f docker/docker-compose.test.yml up -d
 
@@ -183,7 +237,7 @@ uv run python src/orchestrator/runner.py --config test-config.yml --milestone sm
 cat benchmarks/smoke/metrics_test-client.json
 ```
 
-`--skip-sync` is used because Geth `--dev` reports `eth_syncing` as `false` from the start. The `db_size` measurement still runs and gets persisted.
+`--skip-sync` is used because Geth `--dev` was never out of sync — without it the runner would (correctly) record `sync_time_sec: null` after its confirmation window. The `db_size` measurement always runs and gets persisted regardless of `--skip-sync`.
 
 The Grafana dashboard updates live during the run with four rows:
 * **Resources (cAdvisor)** — per-container CPU %, RSS, network RX, disk IOPS/throughput, filtered to the `$client` selector (defaults to `test-client`).
@@ -193,7 +247,7 @@ The Grafana dashboard updates live during the run with four rows:
 
 **Rootless Docker / OrbStack note**: cAdvisor's docker factory cannot resolve OrbStack's custom storage driver layer DB, which drops `name`-enriched container series. Set `DOCKER_SOCK=/dev/null` before `docker compose up -d` so cAdvisor falls back to the systemd factory and the `id`-based series still flow. (On Docker Desktop / rootful Linux: leave `DOCKER_SOCK` unset.)
 
-**Note on re-seeding**: each `docker compose down -v` wipes the dev chain volume. The next seed deploys the test contract from nonce 0 of a fresh dev account, so the contract address changes. The seeder log prints the new address — paste it into `test-config.yml`'s `load_test.addresses` if you want `eth_call(totalSupply())` and `eth_getStorageAt` to hit the initialized contract instead of returning `0x` for an empty account.
+**Note on re-seeding**: each `docker compose down -v` wipes the dev chain volume, so the test contract lands at a different address on the next seed. No manual action needed: the seeder records the deployed address in `benchmarks/.seed-state.json`, and the runner injects it into the load test automatically (via the `LOCUST_EXTRA_ADDRESSES` env var), so `eth_call` / `eth_getStorageAt` / `eth_getProof` always hit the initialized contract.
 
 Tear-down: `docker compose -f docker/docker-compose.test.yml down -v` (or rerun the orchestrator with `--stop-monitoring`).
 
@@ -213,4 +267,4 @@ Unit tests (`tests/unit/`) cover the aggregator's parser/comparator helpers (`re
 
 - Cross-client delta dashboards on top of the existing Grafana provisioning (e.g. side-by-side panels for `chain_execution` across Nethermind / Geth / Besu / Reth / Erigon at the same milestone).
 - Repeatability harness (`--repeat N`, ±5% statistical bound).
-- JWT / engine-API wiring for end-to-end snap-sync-from-peer runs.
+- Distributed (master/worker) Locust: the in-process Prometheus exporter and proof-size CSV are process-local, so the locustfile rejects `--master`/`--worker` at init. Single-process `FastHttpUser` saturates a single-node RPC endpoint comfortably; revisit if a multi-machine load source is ever needed.

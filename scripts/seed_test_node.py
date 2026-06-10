@@ -13,7 +13,9 @@ Idempotent: re-running against the same chain detects existing balances and
 existing bytecode at the deterministic deploy address and skips.
 """
 import argparse
+import json
 import logging
+import os
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -51,16 +53,35 @@ def rpc(url: str, method: str, params: Optional[List[Any]] = None) -> Any:
 
 def wait_for_chain(url: str, timeout: int = 60):
     deadline = time.time() + timeout
+    last_error: Optional[Exception] = None
+    saw_rpc = False
     while time.time() < deadline:
         try:
             block = rpc(url, "eth_blockNumber")
+            saw_rpc = True
             if int(block, 16) > 0:
                 log.info(f"Chain is producing blocks (head={int(block, 16)})")
                 return
         except Exception as e:
+            last_error = e
             log.debug(f"RPC not ready: {e}")
         time.sleep(1)
-    raise RuntimeError(f"Chain did not start producing blocks within {timeout}s")
+
+    if not saw_rpc:
+        raise RuntimeError(
+            f"Could not reach the RPC at {url} within {timeout}s (last error: {last_error}). "
+            "Is the test stack up? Check with: docker ps --filter name=benchmark_test-client\n"
+            "Common cause: a previous benchmark left another client holding port 8545 — the "
+            "runner leaves its stack up by default. Tear everything down first:\n"
+            "  docker ps -aq --filter name=benchmark_ | xargs docker rm -f\n"
+            "then re-run: docker compose -f docker/docker-compose.test.yml up -d"
+        )
+    raise RuntimeError(
+        f"RPC at {url} responds but the chain head stayed at 0 for {timeout}s. "
+        "The node reachable on this port is not the Geth --dev test client "
+        "(dev mode mines a block per second). Check what is bound to 8545: "
+        "docker ps --filter publish=8545"
+    )
 
 
 def wait_for_tx(url: str, tx_hash: str, timeout: int = 30) -> Dict[str, Any]:
@@ -125,6 +146,11 @@ def main():
     parser.add_argument("--rpc", default=DEFAULT_RPC)
     parser.add_argument("--fund-wei", default="0xde0b6b3a7640000", help="Per-address fund amount in wei hex (default 1 ETH)")
     parser.add_argument("--extra-txs", type=int, default=20, help="Extra value transfers to grow the chain")
+    parser.add_argument(
+        "--state-file", default=os.path.join("benchmarks", ".seed-state.json"),
+        help="Where to record the deployed contract address so the runner can "
+             "inject it into the load test (LOCUST_EXTRA_ADDRESSES). Empty to skip.",
+    )
     args = parser.parse_args()
 
     wait_for_chain(args.rpc)
@@ -160,12 +186,24 @@ def main():
         send_value(args.rpc, dev, target, "0x1")
     log.info("Done.")
 
+    # Record the contract address so the runner can inject it into the load
+    # test automatically (no manual pasting into test-config.yml needed).
+    if args.state_file:
+        os.makedirs(os.path.dirname(args.state_file) or ".", exist_ok=True)
+        with open(args.state_file, "w") as f:
+            json.dump({
+                "rpc": args.rpc,
+                "contract_address": contract_addr,
+                "funded_addresses": TEST_ADDRESSES,
+            }, f, indent=2)
+        log.info(f"Wrote seed state to {args.state_file}")
+
     log.info("=== Seed summary ===")
     log.info(f"  Dev account:     {dev}")
     log.info(f"  Funded addrs:    {TEST_ADDRESSES}")
     log.info(f"  Contract:        {contract_addr}")
-    log.info("  test-config.yml load_test.addresses includes the funded addresses + the contract address slot.")
-    log.info("  If the contract address above differs, paste it into test-config.yml.")
+    log.info("  The runner reads the state file above and adds the contract address")
+    log.info("  to the load test automatically (LOCUST_EXTRA_ADDRESSES).")
 
 
 if __name__ == "__main__":

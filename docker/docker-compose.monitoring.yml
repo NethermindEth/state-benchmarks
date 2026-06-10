@@ -1,8 +1,17 @@
-version: '3.8'
+# Distinct project name so the monitoring stack groups separately from the
+# clients in Docker Desktop/OrbStack (default would be "docker" — the dir name).
+name: benchmark-monitoring
+
+# Same named network as docker-compose.clients.yml — Prometheus scrapes the
+# client containers by service name (nethermind:6060, geth:6060, …), which
+# only resolves when both stacks share a network.
+networks:
+  default:
+    name: benchmark_net
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:latest}
     container_name: benchmark_prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -15,11 +24,11 @@ services:
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
     ports:
-      - 9090:9090
+      - "${BIND_ADDR:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     restart: unless-stopped
 
   node_exporter:
-    image: prom/node-exporter:latest
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:latest}
     container_name: benchmark_node_exporter
     volumes:
       - /proc:/host/proc:ro
@@ -31,11 +40,11 @@ services:
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
-      - 9100:9100
+      - "${BIND_ADDR:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
     restart: unless-stopped
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    image: ${CADVISOR_IMAGE:-gcr.io/cadvisor/cadvisor:v0.49.1}
     container_name: benchmark_cadvisor
     # See docker-compose.test.yml for the rationale on `cgroup: host` and the
     # DOCKER_SOCK override (rootless Docker needs `DOCKER_SOCK=/dev/null`).
@@ -43,13 +52,16 @@ services:
     volumes:
       - /:/rootfs:ro
       - /sys:/sys:ro
+      # Host /dev so fs stats can stat backing block devices (e.g. /dev/vdb1 on
+      # OrbStack/VM hosts) — without it cAdvisor spams btrfs mountpoint warnings.
+      - /dev:/dev:ro
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
     ports:
-      - 8080:8080
+      - "${BIND_ADDR:-127.0.0.1}:${CADVISOR_PORT:-8080}:8080"
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: ${GRAFANA_IMAGE:-grafana/grafana:latest}
     container_name: benchmark_grafana
     depends_on:
       - prometheus
@@ -61,12 +73,12 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_AUTH_DISABLE_LOGIN_FORM=false
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_DEFAULT_THEME=dark
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/benchmark.json
     ports:
-      - 3000:3000
+      - "${BIND_ADDR:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     restart: unless-stopped
 
 volumes:

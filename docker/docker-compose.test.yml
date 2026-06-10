@@ -1,21 +1,23 @@
 # Self-contained test stack: Geth in --dev mode + monitoring trio on a shared network.
 # Boots in seconds, produces blocks at 1Hz, exposes Prometheus metrics, supports eth_getProof.
 # Used to smoke-test the benchmark harness end-to-end (see test-config.yml).
+name: benchmark-test
+
 services:
   test-client:
-    image: ethereum/client-go:latest
+    image: ${GETH_IMAGE:-ethereum/client-go:latest}
     container_name: benchmark_test-client
     volumes:
       - test_client_data:/root/.ethereum
     ports:
-      - "8545:8545"
-      - "6060:6060"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${TEST_CLIENT_METRICS_PORT:-6060}:6060"
     command:
       - --dev
       - --dev.period=1
       - --http
       - --http.addr=0.0.0.0
-      - --http.api=eth,net,web3,debug,personal
+      - --http.api=eth,net,web3,debug
       - --http.vhosts=*
       - --http.corsdomain=*
       - --metrics
@@ -26,7 +28,7 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:latest
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:latest}
     container_name: benchmark_prometheus
     # host-gateway makes host.docker.internal resolve to the host on Linux,
     # so Prometheus can scrape the Locust exporter (running on the host as a
@@ -40,11 +42,11 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
     ports:
-      - "9090:9090"
+      - "${BIND_ADDR:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     restart: unless-stopped
 
   node_exporter:
-    image: prom/node-exporter:latest
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:latest}
     container_name: benchmark_node_exporter
     volumes:
       - /proc:/host/proc:ro
@@ -56,11 +58,11 @@ services:
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
-      - "9100:9100"
+      - "${BIND_ADDR:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
     restart: unless-stopped
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    image: ${CADVISOR_IMAGE:-gcr.io/cadvisor/cadvisor:v0.49.1}
     container_name: benchmark_cadvisor
     # No `privileged: true` — it fails on rootless Docker (OrbStack Linux VM),
     # because the userns-mapped container root can't open host device nodes.
@@ -77,13 +79,16 @@ services:
     volumes:
       - /:/rootfs:ro
       - /sys:/sys:ro
+      # Host /dev so fs stats can stat backing block devices (e.g. /dev/vdb1 on
+      # OrbStack/VM hosts) — without it cAdvisor spams btrfs mountpoint warnings.
+      - /dev:/dev:ro
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
     ports:
-      - "8080:8080"
+      - "${BIND_ADDR:-127.0.0.1}:${CADVISOR_PORT:-8080}:8080"
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: ${GRAFANA_IMAGE:-grafana/grafana:latest}
     container_name: benchmark_grafana
     depends_on:
       - prometheus
@@ -95,12 +100,12 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_AUTH_DISABLE_LOGIN_FORM=false
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_DEFAULT_THEME=dark
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/benchmark.json
     ports:
-      - "3000:3000"
+      - "${BIND_ADDR:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     restart: unless-stopped
 
 volumes:
