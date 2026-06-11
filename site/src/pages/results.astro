@@ -8,10 +8,14 @@ import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
 import CompositionChart from '../components/charts/CompositionChart.tsx';
 import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx';
 import ClientComparisonChart from '../components/charts/ClientComparisonChart.tsx';
+import TrieDepthChart from '../components/charts/TrieDepthChart.tsx';
+import SlotHistogramChart from '../components/charts/SlotHistogramChart.tsx';
 import growth from '../data/state-growth.json';
 import proofs from '../data/proof-sizes.json';
 import clients from '../data/client-comparison.json';
 import snap from '../data/snap-sync.json';
+import depth from '../data/trie-depth.json';
+import slots from '../data/slot-histogram.json';
 
 const m1 = growth.milestones.find((m) => m.mult === 1)!;
 const m5 = growth.milestones.find((m) => m.mult === 5)!;
@@ -39,6 +43,19 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
 
       <Card title="Total state size">
         <StateGrowthChart client:visible data={growth.milestones} />
+      </Card>
+
+      <Card title="Trie depth — deepening with state size">
+        <p class="text-sm text-ink-400 mb-4">Account-trie leaf depth, mainnet vs 5×. Going 5× larger shifts the whole distribution just one level deeper (avg 7.61 → 8.20) — the log₁₆ growth law in practice.</p>
+        <TrieDepthChart client:visible levels={depth.levels} />
+        <p class="mt-6 mb-4 text-sm text-ink-400">Within the 5× state, the account trie (avg 8.20) runs deeper than the storage tries (avg 7.24): there are ~4× more storage leaves, but they spread across 24M shallow per-contract tries.</p>
+        <TrieDepthChart client:visible levels={depth.accountVsStorage5x.levels} series={depth.accountVsStorage5x.series} />
+      </Card>
+
+      <Card title="Storage slots per contract — the long tail">
+        <p class="text-sm text-ink-400 mb-4">Contracts grouped by how many storage slots they own (log scale), mainnet vs 5×. ~87% own just 1–3 slots; a ~4k tail owns 16k+ and dominates total storage bytes. The 5× rebloat preserves the mainnet shape.</p>
+        <SlotHistogramChart client:visible buckets={slots.buckets} />
+        <p class="mt-4 text-sm text-ink-400">{slots.note}</p>
       </Card>
 
       <Card title="eth_getProof witness size">

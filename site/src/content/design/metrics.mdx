@@ -5,8 +5,6 @@ order: 3
 ---
 
 import Callout from '../../components/ui/Callout.astro';
-import TrieDepthChart from '../../components/charts/TrieDepthChart.tsx';
-import depth from '../../data/trie-depth.json';
 
 # Metrics & math
 
@@ -51,21 +49,7 @@ The trie is not balanced — but Ethereum addresses are keccak-hashed before ins
 
 The mainnet baseline measures **avg account path depth = 7.61 nibbles** and **avg storage path depth = 4.84 nibbles** (block 24,927,663, 2026-05-05). For comparison, $\log_{16}(381\,413\,929) \approx 7.16$ — the trie carries about half a nibble of structural overhead from extension nodes and unbalanced subtrees.
 
-The measured account-trie leaf distribution confirms the log₁₆ prediction — going from mainnet to 5× shifts the whole distribution one level deeper (avg 7.61 → 8.20), not many:
-
-<figure class="not-prose my-6">
-  <TrieDepthChart client:visible levels={depth.levels} />
-  <figcaption class="mt-3 text-sm text-ink-400">{depth.note}</figcaption>
-</figure>
-
-Within the 5× state, the two trie types sit at different depths — the account trie averages
-8.20 levels, the storage tries 7.24. There are ~4× more storage leaves, but they spread across
-24M small per-contract tries, so each individual storage trie stays shallow:
-
-<figure class="not-prose my-6">
-  <TrieDepthChart client:visible levels={depth.accountVsStorage5x.levels} series={depth.accountVsStorage5x.series} />
-  <figcaption class="mt-3 text-sm text-ink-400">{depth.accountVsStorage5x.note}</figcaption>
-</figure>
+The measured account-trie leaf distribution confirms the log₁₆ prediction — going from mainnet to 5× shifts the whole distribution one level deeper (avg 7.61 → 8.20), not many. At 5× the account trie (avg 8.20) also runs deeper than the storage tries (avg 7.24). Both distributions are plotted on the [Results](/results) page.
 
 ### Branch occupancy
 
