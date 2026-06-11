@@ -184,6 +184,31 @@ bin/orchestrator replay \\
 
     <hr />
 
+    <h2>4 · Snap-sync benchmarking</h2>
+    <p>
+      Milestone states are <strong>frozen</strong> snapshots with no live chain, so a stock node can't
+      snap-sync from them. Runs use an <strong>isolated single-peer</strong> network (frozen source →
+      target over devp2p) with the head set by one manual <code>engine_forkchoiceUpdatedV3</code> — no
+      consensus client.
+    </p>
+    <ul>
+      <li><strong>Nethermind target</strong> — additive opt-in flag <code>Sync.StaticSnapPivot</code> (<a href="https://github.com/NethermindEth/nethermind/pull/11943" target="_blank" rel="noreferrer noopener">nethermind#11943</a>) targets a fixed pivot served by a peer sitting <em>at</em> that pivot, reconstructing <code>stateRoot(H)</code> bit-for-bit.</li>
+      <li><strong>Geth target</strong> — no client change; it picks its own pivot and heals, driven by a minimal fake-CL forkchoice pinned at the source head.</li>
+    </ul>
+    <pre><code>{`# source: frozen NM serving snap
+nethermind --Sync.SnapServingEnabled=true --FlatDb.Enabled=true   # no CL
+
+# NM target
+nethermind --Sync.SnapSync=true --Sync.StaticSnapPivot=true \\
+  --Sync.PivotNumber=<H> --Sync.PivotHash=<hash(H)>`}</code></pre>
+    <Callout type="note" title="Reading the numbers">
+      DB size and peak RSS are topology-independent. Wall time and bandwidth come from a single
+      dedicated LAN peer — read them as <em>relative scaling across state sizes</em>, not real-world
+      multi-peer sync time. Measured results are on the <a href="/results">Results</a> page.
+    </Callout>
+
+    <hr />
+
     <h2>End-to-end</h2>
     <Callout type="goal" title="Bloat → measure → replay">
       <ol class="list-decimal pl-5 space-y-1">

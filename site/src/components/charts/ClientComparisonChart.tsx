@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
 type Row = { mult: number } & Record<string, number>;
-interface Props { data: Row[]; clients?: string[] }
+interface Props { data: Row[]; clients?: string[]; unit?: string; pendingMults?: number[] }
 
 const COLORS: Record<string, string> = {
   nethermind: '#00b3ff',
@@ -12,17 +12,18 @@ const COLORS: Record<string, string> = {
   erigon: '#c084fc',
 };
 
-export default function ClientComparisonChart({ data, clients: clientsProp }: Props) {
+export default function ClientComparisonChart({ data, clients: clientsProp, unit = 'ms', pendingMults = [] }: Props) {
   const ref = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
     const clients = clientsProp ?? ['nethermind', 'geth'];
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
-    const W = 720, H = 360, M = { top: 36, right: 24, bottom: 40, left: 56 };
+    const W = 720, H = 360, M = { top: 36, right: 24, bottom: 44, left: 56 };
 
+    const allMults = [...data.map(d => d.mult), ...pendingMults].sort((a, b) => a - b);
     const x0 = d3.scaleBand()
-      .domain(data.map(d => `${d.mult}x`))
+      .domain(allMults.map(m => `${m}x`))
       .range([M.left, W - M.right])
       .paddingInner(0.25)
       .paddingOuter(0.1);
@@ -44,7 +45,7 @@ export default function ClientComparisonChart({ data, clients: clientsProp }: Pr
       .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
     svg.append('g').attr('transform', `translate(${M.left},0)`)
-      .call(d3.axisLeft(y).ticks(6).tickFormat(d => `${d} ms`))
+      .call(d3.axisLeft(y).ticks(6).tickFormat(d => `${d} ${unit}`))
       .call(g => g.selectAll('text').attr('fill', '#7a839a'))
       .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
 
@@ -76,13 +77,24 @@ export default function ClientComparisonChart({ data, clients: clientsProp }: Pr
         .attr('height', d => y(0) - y((d as Row)[c]));
     });
 
+    // pending milestone slots
+    pendingMults.forEach((m) => {
+      const bx = x0(`${m}x`)!;
+      svg.append('rect').attr('x', bx).attr('y', M.top).attr('width', x0.bandwidth()).attr('height', y(0) - M.top)
+        .attr('fill', 'none').attr('stroke', '#13405c').attr('stroke-dasharray', '4 4');
+      svg.append('text').attr('x', bx + x0.bandwidth() / 2).attr('y', (M.top + y(0)) / 2)
+        .attr('text-anchor', 'middle').attr('fill', '#525c75').attr('font-size', 11).attr('font-family', 'JetBrains Mono').text('pending');
+      svg.append('text').attr('x', bx + x0.bandwidth() / 2).attr('y', H - M.bottom + 32)
+        .attr('text-anchor', 'middle').attr('fill', '#525c75').attr('font-size', 9).attr('font-family', 'JetBrains Mono').text('not measured');
+    });
+
     const legend = svg.append('g').attr('transform', `translate(${M.left + 8},${M.top - 24})`);
     clients.forEach((c, i) => {
       const g = legend.append('g').attr('transform', `translate(${i * 110},0)`);
       g.append('rect').attr('width', 14).attr('height', 10).attr('y', 2).attr('rx', 2).attr('fill', color(c));
       g.append('text').attr('x', 20).attr('y', 11).attr('fill', '#aab2c2').attr('font-size', 12).text(c);
     });
-  }, [data, clientsProp]);
+  }, [data, clientsProp, unit, pendingMults]);
 
   return <svg ref={ref} className="w-full h-auto" role="img" aria-label="Client execution time comparison" />;
 }
