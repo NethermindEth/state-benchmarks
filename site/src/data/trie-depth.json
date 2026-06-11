@@ -1,20 +1,24 @@
 {
-  "metric": "account-trie leaf count by structural depth level (TrieDiffWalker convention)",
-  "source": "1× from state-benchmarks #5 (geth inspect-trie value-node column); 5× from #29 (sidecar full re-scan valueNodeCount). Both exact.",
-  "avgDepth": { "x1": 7.61, "x5": 8.20 },
-  "levels": [
-    { "depth": 8,  "x1": 92723918,   "x5": 1186965 },
-    { "depth": 9,  "x1": 251137398,  "x5": 1251962794 },
-    { "depth": 10, "x1": 29870177,   "x5": 683109803 },
-    { "depth": 11, "x1": 1543551,    "x5": 55646740 },
-    { "depth": 12, "x1": 12329,      "x5": 1339738 },
-    { "depth": 13, "x1": 144,        "x5": 6936 },
-    { "depth": 14, "x1": 0,          "x5": 10 }
+  "metric": "account-trie leaf count by depth level",
+  "source": "1× #5 (block 24,927,663); 3.5× PRISTINE scan (block 24,358,000); 5× #29 (block 24,546,596). Exact value-node counts per level.",
+  "series": [
+    { "key": "x1",  "label": "1× mainnet", "color": "#00b3ff" },
+    { "key": "x35", "label": "3.5×",       "color": "#ff9900" },
+    { "key": "x5",  "label": "5×",          "color": "#34d399" }
   ],
-  "note": "Normalised to % of all account leaves so the two state sizes are shape-comparable. The 5× distribution sits one level deeper — the structural consequence of 5× more accounts (log₁₆ growth), avg depth 7.61 → 8.20.",
+  "pending": ["7×", "10×"],
+  "levels": [
+    { "depth": 8,  "x1": 92723918,  "x35": 91044153,  "x5": 1186965 },
+    { "depth": 9,  "x1": 251137398, "x35": 266444381, "x5": 1251962794 },
+    { "depth": 10, "x1": 29870177,  "x35": 32441223,  "x5": 683109803 },
+    { "depth": 11, "x1": 1543551,   "x35": 1710796,   "x5": 55646740 },
+    { "depth": 12, "x1": 12329,     "x35": 13880,     "x5": 1339738 },
+    { "depth": 13, "x1": 144,       "x35": 158,       "x5": 6936 },
+    { "depth": 14, "x1": 0,         "x35": 0,         "x5": 10 }
+  ],
+  "note": "Account-trie leaves by depth level, normalised to %. 1× and 3.5× nearly coincide (≈381M vs 392M accounts → same depth), while 5× (1.99B accounts) shifts a level deeper — depth tracks account count, the log₁₆ law. 7× and 10× are pending.",
 
   "accountVsStorage5x": {
-    "avgDepth": { "account": 8.20, "storage": 7.24 },
     "series": [
       { "key": "account", "label": "account trie", "color": "#00b3ff" },
       { "key": "storage", "label": "storage tries", "color": "#ff9900" }
@@ -35,6 +39,6 @@
       { "depth": 13, "account": 6936,       "storage": 6314 },
       { "depth": 14, "account": 10,         "storage": 8 }
     ],
-    "note": "At 5× the storage tries (avg 7.24 levels) are shallower than the account trie (avg 8.20) — there are far more storage leaves but they spread across many small per-contract tries, so each is shallow. Both measured exactly in the #29 full re-scan."
+    "note": "Within the 5× state: the storage tries (orange) carry most of their leaves at depths 8–9 across 24M small per-contract tries, while the account trie (blue) sits slightly deeper — exact from the #29 full re-scan."
   }
 }

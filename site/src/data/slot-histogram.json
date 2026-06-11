@@ -1,22 +1,28 @@
 {
   "metric": "number of contracts owning N storage slots, by bucket",
-  "source": "mainnet from state-benchmarks #5 (block 24,927,663); 5× from #29 (block 24,546,596). Exact slotCountHistogram from the sidecar full scan.",
-  "buckets": [
-    { "bucket": "1",      "mainnet": 18210124, "x5": 16624530 },
-    { "bucket": "2-3",    "mainnet": 4038607,  "x5": 4665994 },
-    { "bucket": "4-7",    "mainnet": 2396672,  "x5": 1779917 },
-    { "bucket": "8-15",   "mainnet": 706808,   "x5": 589036 },
-    { "bucket": "16-31",  "mainnet": 254945,   "x5": 226727 },
-    { "bucket": "32-63",  "mainnet": 159909,   "x5": 144468 },
-    { "bucket": "64-127", "mainnet": 107737,   "x5": 99249 },
-    { "bucket": "128-255","mainnet": 65963,    "x5": 60463 },
-    { "bucket": "256-511","mainnet": 43612,    "x5": 43083 },
-    { "bucket": "512-1k", "mainnet": 28057,    "x5": 25918 },
-    { "bucket": "1k-2k",  "mainnet": 18498,    "x5": 17189 },
-    { "bucket": "2k-4k",  "mainnet": 11977,    "x5": 11151 },
-    { "bucket": "4k-8k",  "mainnet": 7598,     "x5": 7115 },
-    { "bucket": "8k-16k", "mainnet": 4421,     "x5": 4116 },
-    { "bucket": "16k+",   "mainnet": 4360,     "x5": 4093 }
+  "source": "mainnet #5 (block 24,927,663); 3.5× PRISTINE statecomp scan (block 24,358,000); 5× #29 (block 24,546,596). Exact slotCountHistogram from the sidecar full scan.",
+  "series": [
+    { "key": "x1",  "label": "1× mainnet", "color": "#00b3ff" },
+    { "key": "x35", "label": "3.5×",       "color": "#ff9900" },
+    { "key": "x5",  "label": "5×",          "color": "#34d399" }
   ],
-  "note": "~87% of contracts own just 1–3 slots, while a tail of ~4,000 contracts hold 16k+ slots each — and that tail dominates total storage bytes. The 5× state preserves this mainnet long-tail shape (it was rebloated to match composition), which is exactly the property a faithful synthetic state must keep."
+  "pending": ["7×", "10×"],
+  "buckets": [
+    { "bucket": "1",      "x1": 18210124, "x35": 16624924, "x5": 16624530 },
+    { "bucket": "2-3",    "x1": 4038607,  "x35": 4666088,  "x5": 4665994 },
+    { "bucket": "4-7",    "x1": 2396672,  "x35": 1779966,  "x5": 1779917 },
+    { "bucket": "8-15",   "x1": 706808,   "x35": 589050,   "x5": 589036 },
+    { "bucket": "16-31",  "x1": 254945,   "x35": 226738,   "x5": 226727 },
+    { "bucket": "32-63",  "x1": 159909,   "x35": 144471,   "x5": 144468 },
+    { "bucket": "64-127", "x1": 107737,   "x35": 99250,    "x5": 99249 },
+    { "bucket": "128-255","x1": 65963,    "x35": 60465,    "x5": 60463 },
+    { "bucket": "256-511","x1": 43612,    "x35": 43084,    "x5": 43083 },
+    { "bucket": "512-1k", "x1": 28057,    "x35": 25920,    "x5": 25918 },
+    { "bucket": "1k-2k",  "x1": 18498,    "x35": 17189,    "x5": 17189 },
+    { "bucket": "2k-4k",  "x1": 11977,    "x35": 11151,    "x5": 11151 },
+    { "bucket": "4k-8k",  "x1": 7598,     "x35": 7116,     "x5": 7115 },
+    { "bucket": "8k-16k", "x1": 4421,     "x35": 4115,     "x5": 4116 },
+    { "bucket": "16k+",   "x1": 4360,     "x35": 4095,     "x5": 4093 }
+  ],
+  "note": "~87% of contracts own 1–3 slots; a tail of ~4k own 16k+ and dominate total storage bytes. The 3.5× and 5× curves sit almost exactly on top of each other — storage was already bloated at 3.5×, and the rebloat to 5× added accounts, not slots. 7× and 10× are pending."
 }

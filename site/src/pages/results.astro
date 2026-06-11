@@ -45,16 +45,16 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         <StateGrowthChart client:visible data={growth.milestones} />
       </Card>
 
-      <Card title="Trie depth — deepening with state size">
-        <p class="text-sm text-ink-400 mb-4">Account-trie leaf depth, mainnet vs 5×. Going 5× larger shifts the whole distribution just one level deeper (avg 7.61 → 8.20) — the log₁₆ growth law in practice.</p>
-        <TrieDepthChart client:visible levels={depth.levels} />
-        <p class="mt-6 mb-4 text-sm text-ink-400">Within the 5× state, the account trie (avg 8.20) runs deeper than the storage tries (avg 7.24): there are ~4× more storage leaves, but they spread across 24M shallow per-contract tries.</p>
+      <Card title="Account-trie depth across milestones">
+        <p class="text-sm text-ink-400 mb-4">Where account leaves sit in the trie, per milestone. 1× and 3.5× nearly coincide (similar account counts), while 5× shifts a level deeper — depth tracks account count, the log₁₆ law. 7× and 10× pending.</p>
+        <TrieDepthChart client:visible levels={depth.levels} series={depth.series} pending={depth.pending} />
+        <p class="mt-6 mb-4 text-sm text-ink-400">Within the 5× state, account vs storage tries: there are ~4× more storage leaves, but they spread across 24M shallow per-contract tries, so each storage trie stays slightly shallower than the single account trie.</p>
         <TrieDepthChart client:visible levels={depth.accountVsStorage5x.levels} series={depth.accountVsStorage5x.series} />
       </Card>
 
       <Card title="Storage slots per contract — the long tail">
-        <p class="text-sm text-ink-400 mb-4">Contracts grouped by how many storage slots they own (log scale), mainnet vs 5×. ~87% own just 1–3 slots; a ~4k tail owns 16k+ and dominates total storage bytes. The 5× rebloat preserves the mainnet shape.</p>
-        <SlotHistogramChart client:visible buckets={slots.buckets} />
+        <p class="text-sm text-ink-400 mb-4">Contracts by how many storage slots they own (log scale), per milestone. ~87% own 1–3 slots; a ~4k tail owns 16k+ and dominates storage bytes. 7× and 10× pending.</p>
+        <SlotHistogramChart client:visible buckets={slots.buckets} series={slots.series} pending={slots.pending} />
         <p class="mt-4 text-sm text-ink-400">{slots.note}</p>
       </Card>
 
