@@ -45,23 +45,32 @@ export default function SlotHistogramChart({ buckets, series = DEFAULT_SERIES, p
       .selectAll('line').data(y.ticks(5)).join('line')
       .attr('x1', M.left).attr('x2', W - M.right).attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#001a2c');
 
+    // distinct styling so near-coincident lines stay separable
+    const DASH = ['none', '8 4', '2 4'];
+    const SW = [3.4, 2.4, 1.6];
+    const MR = [5.5, 3.6, 2];
     series.forEach((s, si) => {
+      const dash = DASH[si % 3];
       const line = d3.line<Bucket>().x(d => x(d.bucket)!).y(d => y(d[s.key] ?? 1)).curve(d3.curveMonotoneX);
-      const path = svg.append('path').datum(buckets).attr('fill', 'none').attr('stroke', s.color).attr('stroke-width', 2.5).attr('d', line);
+      const path = svg.append('path').datum(buckets).attr('fill', 'none').attr('stroke', s.color)
+        .attr('stroke-width', SW[si] ?? 2).attr('opacity', 0.95).attr('d', line);
       const len = (path.node() as SVGPathElement).getTotalLength();
       path.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len)
-        .transition().delay(si * 150).duration(900).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0);
+        .transition().delay(si * 150).duration(900).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0)
+        .on('end', () => path.attr('stroke-dasharray', dash === 'none' ? null : dash));
       const dots = svg.append('g').selectAll('circle').data(buckets).join('circle')
-        .attr('cx', d => x(d.bucket)!).attr('cy', d => y(d[s.key] ?? 1)).attr('r', 0).attr('fill', s.color);
+        .attr('cx', d => x(d.bucket)!).attr('cy', d => y(d[s.key] ?? 1)).attr('r', 0)
+        .attr('fill', si === series.length - 1 ? s.color : 'none')
+        .attr('stroke', s.color).attr('stroke-width', 1.5);
       dots.append('title').text(d => `${s.label}, ${d.bucket} slots: ${(d[s.key] ?? 0).toLocaleString()} contracts`);
-      dots.transition().delay(si * 150 + 700).duration(250).attr('r', 3);
+      dots.transition().delay(si * 150 + 700).duration(250).attr('r', MR[si] ?? 3);
     });
 
     const legend = svg.append('g').attr('transform', `translate(${M.left + 4},${M.top - 30})`);
     let lx = 0;
-    series.forEach((s) => {
+    series.forEach((s, si) => {
       const g = legend.append('g').attr('transform', `translate(${lx},0)`);
-      g.append('line').attr('x1', 0).attr('x2', 18).attr('y1', 6).attr('y2', 6).attr('stroke', s.color).attr('stroke-width', 2.5);
+      g.append('line').attr('x1', 0).attr('x2', 18).attr('y1', 6).attr('y2', 6).attr('stroke', s.color).attr('stroke-width', SW[si] ?? 2.5).attr('stroke-dasharray', DASH[si % 3] === 'none' ? null : DASH[si % 3]);
       g.append('text').attr('x', 24).attr('y', 10).attr('fill', '#aab2c2').attr('font-size', 12).text(s.label);
       lx += 30 + s.label.length * 7.5;
     });
