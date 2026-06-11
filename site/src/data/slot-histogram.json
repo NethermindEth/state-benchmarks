@@ -24,5 +24,5 @@
     { "bucket": "8k-16k", "x1": 4421,     "x35": 4115,     "x5": 4116 },
     { "bucket": "16k+",   "x1": 4360,     "x35": 4095,     "x5": 4093 }
   ],
-  "note": "~87% of contracts own 1–3 slots; a tail of ~4k own 16k+ and dominate total storage bytes. The 3.5× and 5× curves sit almost exactly on top of each other — storage was already bloated at 3.5×, and the rebloat to 5× added accounts, not slots. 7× and 10× are pending."
+  "note": "~87% of contracts own 1–3 slots; a tail of ~4k own 16k+. All three milestones nearly overlap — the per-contract slot-count shape is preserved as the state grows. But the open \"16k+\" bucket hides where the bloat actually goes: those tail contracts balloon into storage-spam mega-tries, which the storage-trie depth chart above exposes. 7× and 10× are pending."
 }
