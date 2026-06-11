@@ -1,105 +1,57 @@
-import { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
+import { useMemo } from 'react';
+import EChart from './EChart.tsx';
+import { base, catAxis, valAxis, BRAND } from './echarts-base';
 
 interface Row { mult: number; accountP50: number; accountP95: number; storageP50: number; measured?: boolean }
 interface Props { data: Row[]; pendingMults?: number[]; theory?: { mult: number; y: number }[] }
 
-const SERIES = [
-  { key: 'accountP50', label: 'account p50', color: '#00b3ff' },
-  { key: 'accountP95', label: 'account p95', color: '#4fc9ff' },
-  { key: 'storageP50', label: 'account + 1 slot p50', color: '#ff9900' },
+const BARS = [
+  { key: 'accountP50', label: 'account p50', color: BRAND.blue },
+  { key: 'accountP95', label: 'account p95', color: BRAND.blueLight },
+  { key: 'storageP50', label: 'account + 1 slot p50', color: BRAND.orange },
 ] as const;
 
 export default function ProofComparisonChart({ data, pendingMults = [], theory = [] }: Props) {
-  const ref = useRef<SVGSVGElement | null>(null);
+  const option = useMemo(() => {
+    const mults = [...data.map((d) => d.mult), ...pendingMults].sort((a, b) => a - b);
+    const cats = mults.map((m) => `${m}×`);
+    const byMult = new Map(data.map((d) => [d.mult, d]));
+    const theoryByMult = new Map(theory.map((t) => [t.mult, t.y]));
 
-  useEffect(() => {
-    const svg = d3.select(ref.current);
-    svg.selectAll('*').remove();
-    const W = 720, H = 372, M = { top: 56, right: 24, bottom: 44, left: 56 };
+    const barSeries = BARS.map((b) => ({
+      name: b.label,
+      type: 'bar' as const,
+      barWidth: '20%',
+      itemStyle: { color: b.color, borderRadius: [2, 2, 0, 0] },
+      emphasis: { focus: 'series' as const },
+      data: mults.map((m) => (byMult.get(m) as Row | undefined)?.[b.key] ?? null),
+    }));
 
-    const allMults = [...data.map(d => d.mult), ...pendingMults].sort((a, b) => a - b);
-    const x0 = d3.scaleBand().domain(allMults.map(m => `${m}x`)).range([M.left, W - M.right]).paddingInner(0.3).paddingOuter(0.1);
-    const x1 = d3.scaleBand().domain(SERIES.map(s => s.key)).range([0, x0.bandwidth()]).padding(0.12);
+    const theorySeries = theory.length
+      ? [{
+          name: 'theory (log₁₆)',
+          type: 'line' as const,
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 6,
+          lineStyle: { color: '#ffffff', width: 2, type: 'dashed' as const },
+          itemStyle: { color: '#ffffff' },
+          z: 5,
+          data: mults.map((m) => theoryByMult.get(m) ?? null),
+        }]
+      : [];
 
-    const y = d3.scaleLinear()
-      .domain([0, d3.max(data, d => Math.max(d.accountP95, d.storageP50))! * 1.18])
-      .nice()
-      .range([H - M.bottom, M.top]);
+    const legendData = [...BARS.map((b) => b.label), ...(theory.length ? ['theory (log₁₆)'] : [])];
 
-    svg.attr('viewBox', `0 0 ${W} ${H}`);
-
-    svg.append('g').attr('transform', `translate(0,${H - M.bottom})`)
-      .call(d3.axisBottom(x0))
-      .call(g => g.selectAll('text').attr('fill', '#aab2c2').attr('font-size', 12))
-      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
-
-    svg.append('g').attr('transform', `translate(${M.left},0)`)
-      .call(d3.axisLeft(y).ticks(5).tickFormat(d => `${(+d / 1024).toFixed(1)} KB`))
-      .call(g => g.selectAll('text').attr('fill', '#7a839a'))
-      .call(g => g.selectAll('line, path').attr('stroke', '#13405c'));
-
-    svg.append('g').attr('opacity', 0.22)
-      .selectAll('line').data(y.ticks(5)).join('line')
-      .attr('x1', M.left).attr('x2', W - M.right)
-      .attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', '#001a2c');
-
-    // pending slots
-    pendingMults.forEach((m) => {
-      const bx = x0(`${m}x`)!;
-      svg.append('rect').attr('x', bx).attr('y', M.top).attr('width', x0.bandwidth()).attr('height', y(0) - M.top)
-        .attr('fill', 'none').attr('stroke', '#13405c').attr('stroke-dasharray', '4 4');
-      svg.append('text').attr('x', bx + x0.bandwidth() / 2).attr('y', (M.top + y(0)) / 2)
-        .attr('text-anchor', 'middle').attr('fill', '#525c75').attr('font-size', 11).attr('font-family', 'JetBrains Mono').text('pending');
-      svg.append('text').attr('x', bx + x0.bandwidth() / 2).attr('y', H - M.bottom + 34)
-        .attr('text-anchor', 'middle').attr('fill', '#525c75').attr('font-size', 9).attr('font-family', 'JetBrains Mono').text('not sampled');
-    });
-
-    data.forEach((d, di) => {
-      const g = svg.append('g').attr('transform', `translate(${x0(`${d.mult}x`)},0)`);
-      SERIES.forEach((s) => {
-        g.append('rect')
-          .attr('x', x1(s.key)!).attr('y', y(0)).attr('width', x1.bandwidth()).attr('height', 0).attr('rx', 2)
-          .attr('fill', s.color)
-          .transition().delay(di * 80).duration(800).ease(d3.easeCubicOut)
-          .attr('y', y((d as any)[s.key])).attr('height', y(0) - y((d as any)[s.key]));
-      });
-      svg.append('text').attr('x', x0(`${d.mult}x`)! + x0.bandwidth() / 2).attr('y', H - M.bottom + 34)
-        .attr('text-anchor', 'middle').attr('fill', '#34d399').attr('font-size', 9).attr('font-family', 'JetBrains Mono').text('measured');
-    });
-
-    // theoretical model overlay (log16 prediction for the account-p50 series)
-    const theoryPts = theory
-      .filter(t => x0(`${t.mult}x`) != null)
-      .map(t => ({ cx: x0(`${t.mult}x`)! + x1('accountP50')! + x1.bandwidth() / 2, cy: y(t.y) }));
-    if (theoryPts.length > 1) {
-      const tline = d3.line<{ cx: number; cy: number }>().x(d => d.cx).y(d => d.cy);
-      const tpath = svg.append('path').datum(theoryPts)
-        .attr('fill', 'none').attr('stroke', '#ffffff').attr('stroke-width', 2)
-        .attr('stroke-dasharray', '5 4').attr('opacity', 0.85).attr('d', tline);
-      const len = (tpath.node() as SVGPathElement).getTotalLength();
-      tpath.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len)
-        .transition().delay(400).duration(1000).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0)
-        .on('end', () => tpath.attr('stroke-dasharray', '5 4'));
-    }
-    theoryPts.forEach((p) => {
-      svg.append('circle').attr('cx', p.cx).attr('cy', p.cy).attr('r', 0)
-        .attr('fill', '#00253d').attr('stroke', '#ffffff').attr('stroke-width', 2)
-        .transition().delay(1100).duration(250).attr('r', 4);
-    });
-
-    const legend = svg.append('g').attr('transform', `translate(${M.left + 4},${M.top - 26})`);
-    SERIES.forEach((s, i) => {
-      const g = legend.append('g').attr('transform', `translate(${i * 150},0)`);
-      g.append('rect').attr('width', 12).attr('height', 12).attr('rx', 2).attr('fill', s.color);
-      g.append('text').attr('x', 18).attr('y', 11).attr('fill', '#aab2c2').attr('font-size', 12).text(s.label);
-    });
-    if (theory.length) {
-      const g = legend.append('g').attr('transform', 'translate(0,18)');
-      g.append('line').attr('x1', 0).attr('x2', 16).attr('y1', 6).attr('y2', 6).attr('stroke', '#ffffff').attr('stroke-width', 2).attr('stroke-dasharray', '5 4');
-      g.append('text').attr('x', 22).attr('y', 11).attr('fill', '#aab2c2').attr('font-size', 12).text('theory: account p50 = c₀ + c₁·log₁₆(n)');
-    }
+    return {
+      ...base({ legend: true }),
+      legend: { ...base({ legend: true }).legend, data: legendData },
+      tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? '—' : `${(v / 1024).toFixed(2)} KB`) },
+      xAxis: catAxis('', { data: cats }),
+      yAxis: valAxis('proof size', { axisLabel: { color: BRAND.textDim, formatter: (v: number) => `${(v / 1024).toFixed(1)} KB` } }),
+      series: [...barSeries, ...theorySeries],
+    };
   }, [data, pendingMults, theory]);
 
-  return <svg ref={ref} className="w-full h-auto" role="img" aria-label="eth_getProof size across measured milestones" />;
+  return <EChart option={option} height={380} ariaLabel="eth_getProof size across milestones" />;
 }
