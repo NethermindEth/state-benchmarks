@@ -11,5 +11,30 @@
     { "depth": 13, "x1": 144,        "x5": 6936 },
     { "depth": 14, "x1": 0,          "x5": 10 }
   ],
-  "note": "Normalised to % of all account leaves so the two state sizes are shape-comparable. The 5× distribution sits one level deeper — the structural consequence of 5× more accounts (log₁₆ growth), avg depth 7.61 → 8.20."
+  "note": "Normalised to % of all account leaves so the two state sizes are shape-comparable. The 5× distribution sits one level deeper — the structural consequence of 5× more accounts (log₁₆ growth), avg depth 7.61 → 8.20.",
+
+  "accountVsStorage5x": {
+    "avgDepth": { "account": 8.20, "storage": 7.24 },
+    "series": [
+      { "key": "account", "label": "account trie", "color": "#00b3ff" },
+      { "key": "storage", "label": "storage tries", "color": "#ff9900" }
+    ],
+    "levels": [
+      { "depth": 1,  "account": 0,          "storage": 12950471 },
+      { "depth": 2,  "account": 0,          "storage": 39715548 },
+      { "depth": 3,  "account": 0,          "storage": 49128269 },
+      { "depth": 4,  "account": 0,          "storage": 125078910 },
+      { "depth": 5,  "account": 0,          "storage": 291000717 },
+      { "depth": 6,  "account": 0,          "storage": 329035928 },
+      { "depth": 7,  "account": 0,          "storage": 457900379 },
+      { "depth": 8,  "account": 1186965,    "storage": 1081059038 },
+      { "depth": 9,  "account": 1251962794, "storage": 4212789744 },
+      { "depth": 10, "account": 683109803,  "storage": 1110362903 },
+      { "depth": 11, "account": 55646740,   "storage": 80379872 },
+      { "depth": 12, "account": 1339738,    "storage": 1434481 },
+      { "depth": 13, "account": 6936,       "storage": 6314 },
+      { "depth": 14, "account": 10,         "storage": 8 }
+    ],
+    "note": "At 5× the storage tries (avg 7.24 levels) are shallower than the account trie (avg 8.20) — there are far more storage leaves but they spread across many small per-contract tries, so each is shallow. Both measured exactly in the #29 full re-scan."
+  }
 }

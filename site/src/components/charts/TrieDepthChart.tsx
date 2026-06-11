@@ -1,15 +1,19 @@
 import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
-interface Level { depth: number; x1: number; x5: number }
-interface Props { levels: Level[] }
+type Level = { depth: number } & Record<string, number>;
+interface Serie { key: string; label: string; color: string }
+interface Props {
+  levels: Level[];
+  series?: Serie[];
+}
 
-const SERIES = [
+const DEFAULT_SERIES: Serie[] = [
   { key: 'x1', label: '1× mainnet', color: '#00b3ff' },
   { key: 'x5', label: '5× bloated', color: '#ff9900' },
-] as const;
+];
 
-export default function TrieDepthChart({ levels }: Props) {
+export default function TrieDepthChart({ levels, series = DEFAULT_SERIES }: Props) {
   const ref = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
@@ -17,13 +21,13 @@ export default function TrieDepthChart({ levels }: Props) {
     svg.selectAll('*').remove();
     const W = 720, H = 340, M = { top: 40, right: 24, bottom: 44, left: 48 };
 
-    const t1 = d3.sum(levels, d => d.x1);
-    const t5 = d3.sum(levels, d => d.x5);
-    const pct = (d: Level, k: 'x1' | 'x5') => (d[k] / (k === 'x1' ? t1 : t5)) * 100;
+    const totals: Record<string, number> = {};
+    series.forEach((s) => { totals[s.key] = d3.sum(levels, (d) => d[s.key] ?? 0); });
+    const pct = (d: Level, k: string) => (totals[k] ? ((d[k] ?? 0) / totals[k]) * 100 : 0);
 
     const x0 = d3.scaleBand().domain(levels.map(d => `${d.depth}`)).range([M.left, W - M.right]).paddingInner(0.25).paddingOuter(0.1);
-    const x1 = d3.scaleBand().domain(SERIES.map(s => s.key)).range([0, x0.bandwidth()]).padding(0.08);
-    const y = d3.scaleLinear().domain([0, d3.max(levels, d => Math.max(pct(d, 'x1'), pct(d, 'x5')))! * 1.12]).nice().range([H - M.bottom, M.top]);
+    const x1 = d3.scaleBand().domain(series.map(s => s.key)).range([0, x0.bandwidth()]).padding(0.08);
+    const y = d3.scaleLinear().domain([0, d3.max(levels, d => Math.max(...series.map(s => pct(d, s.key))))! * 1.12]).nice().range([H - M.bottom, M.top]);
 
     svg.attr('viewBox', `0 0 ${W} ${H}`);
 
@@ -44,8 +48,8 @@ export default function TrieDepthChart({ levels }: Props) {
 
     levels.forEach((d, di) => {
       const g = svg.append('g').attr('transform', `translate(${x0(`${d.depth}`)},0)`);
-      SERIES.forEach((s) => {
-        const v = pct(d, s.key as 'x1' | 'x5');
+      series.forEach((s) => {
+        const v = pct(d, s.key);
         g.append('rect')
           .attr('x', x1(s.key)!).attr('y', y(0)).attr('width', x1.bandwidth()).attr('height', 0).attr('rx', 2)
           .attr('fill', s.color)
@@ -54,13 +58,13 @@ export default function TrieDepthChart({ levels }: Props) {
       });
     });
 
-    const legend = svg.append('g').attr('transform', `translate(${W - M.right - 220},${M.top - 26})`);
-    SERIES.forEach((s, i) => {
+    const legend = svg.append('g').attr('transform', `translate(${W - M.right - 230},${M.top - 26})`);
+    series.forEach((s, i) => {
       const g = legend.append('g').attr('transform', `translate(${i * 120},0)`);
       g.append('rect').attr('width', 12).attr('height', 12).attr('rx', 2).attr('fill', s.color);
       g.append('text').attr('x', 18).attr('y', 11).attr('fill', '#aab2c2').attr('font-size', 12).text(s.label);
     });
-  }, [levels]);
+  }, [levels, series]);
 
-  return <svg ref={ref} className="w-full h-auto" role="img" aria-label="Account trie depth distribution, mainnet vs 5x" />;
+  return <svg ref={ref} className="w-full h-auto" role="img" aria-label="Trie depth distribution" />;
 }
