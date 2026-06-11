@@ -18,9 +18,8 @@ const DEFAULT_SERIES: Serie[] = [
 
 export default function TrieDepthChart({ levels, series = DEFAULT_SERIES, pending = [] }: Props) {
   const option = useMemo(() => {
-    const totals: Record<string, number> = {};
-    series.forEach((s) => { totals[s.key] = levels.reduce((a, d) => a + (d[s.key] ?? 0), 0); });
     const depths = levels.map((d) => `${d.depth}`);
+    const fmt = (v: number) => (v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}k` : `${v}`);
 
     const lineSeries = series.map((s, i) => ({
       name: s.label,
@@ -31,7 +30,7 @@ export default function TrieDepthChart({ levels, series = DEFAULT_SERIES, pendin
       lineStyle: { width: 3 - i * 0.6, type: LINE_TYPES[i % 3] },
       itemStyle: { color: s.color },
       emphasis: { focus: 'series' as const },
-      data: levels.map((d) => +(((d[s.key] ?? 0) / (totals[s.key] || 1)) * 100).toFixed(2)),
+      data: levels.map((d) => (d[s.key] ?? 0) || null),
     }));
     const pendingSeries = pending.map((p) => ({
       name: `${p} pending`,
@@ -44,9 +43,9 @@ export default function TrieDepthChart({ levels, series = DEFAULT_SERIES, pendin
     return {
       ...base({ legend: true, zoom: true }),
       legend: { ...base({ legend: true }).legend, data: [...series.map((s) => s.label), ...pending.map((p) => `${p} pending`)] },
-      tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? '—' : `${v}%`) },
+      tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? '—' : `${v.toLocaleString()} leaves`) },
       xAxis: catAxis('trie depth (levels from root)', { data: depths, boundaryGap: false }),
-      yAxis: valAxis('% of leaves', { axisLabel: { color: BRAND.textDim, formatter: '{value}%' } }),
+      yAxis: valAxis('leaves (log scale)', { type: 'log', min: 1, axisLabel: { color: BRAND.textDim, formatter: (v: number) => fmt(v) } }),
       series: [...lineSeries, ...pendingSeries],
     };
   }, [levels, series, pending]);

@@ -21,10 +21,7 @@ const AXES = [
 export default function CompositionChart({ data }: Props) {
   const option = useMemo(() => {
     const cats = data.map((d) => `${d.mult}×`);
-    const pct = (d: Row, k: 'storGB' | 'acctGB' | 'codeGB') => {
-      const total = (d.acctGB ?? 0) + (d.storGB ?? 0) + (d.codeGB ?? 0);
-      return total ? +(((d[k] ?? 0) / total) * 100).toFixed(1) : null;
-    };
+    const gb = (v: number | null) => (v == null ? 'pending' : v >= 1000 ? `${(v / 1000).toFixed(2)} TB` : `${Math.round(v)} GB`);
     const series = AXES.map((a) => ({
       name: a.label,
       type: 'bar' as const,
@@ -32,14 +29,14 @@ export default function CompositionChart({ data }: Props) {
       barWidth: '52%',
       itemStyle: { color: a.color },
       emphasis: { focus: 'series' as const },
-      data: data.map((d) => pct(d, a.key)),
+      data: data.map((d) => d[a.key] ?? null),
     }));
     return {
       ...base({ legend: true, zoom: true }),
       legend: { ...base({ legend: true }).legend, data: AXES.map((a) => a.label) },
-      tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? 'pending' : `${v}%`) },
+      tooltip: { ...base().tooltip, valueFormatter: (v: number) => gb(v) },
       xAxis: catAxis('', { data: cats }),
-      yAxis: valAxis('', { max: 100, axisLabel: { color: BRAND.textDim, formatter: '{value}%' } }),
+      yAxis: valAxis('trie size', { axisLabel: { color: BRAND.textDim, formatter: (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} TB` : `${v} GB`) } }),
       series,
     };
   }, [data]);
