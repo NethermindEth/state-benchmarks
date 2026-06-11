@@ -9,7 +9,7 @@ export default function StateGrowthChart({ data }: Props) {
   const option = useMemo(() => {
     const cats = data.map((d) => `${d.mult}×`);
     return {
-      ...base({ legend: false }),
+      ...base({ legend: false, zoom: true }),
       tooltip: {
         ...base({ legend: false }).tooltip,
         valueFormatter: (v: number) => (v == null ? 'pending' : v >= 1000 ? `${(v / 1000).toFixed(2)} TB` : `${Math.round(v)} GB`),

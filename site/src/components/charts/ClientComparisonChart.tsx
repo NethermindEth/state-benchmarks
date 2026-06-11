@@ -29,7 +29,7 @@ export default function ClientComparisonChart({ data, clients = ['nethermind', '
     }));
 
     return {
-      ...base({ legend: true }),
+      ...base({ legend: true, zoom: true }),
       legend: { ...base({ legend: true }).legend, data: clients },
       tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? 'pending' : `${v} ${unit}`) },
       xAxis: catAxis('', { data: cats }),

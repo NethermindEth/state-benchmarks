@@ -35,7 +35,7 @@ export default function CompositionChart({ data }: Props) {
       data: data.map((d) => pct(d, a.key)),
     }));
     return {
-      ...base({ legend: true }),
+      ...base({ legend: true, zoom: true }),
       legend: { ...base({ legend: true }).legend, data: AXES.map((a) => a.label) },
       tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? 'pending' : `${v}%`) },
       xAxis: catAxis('', { data: cats }),

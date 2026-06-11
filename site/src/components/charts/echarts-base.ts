@@ -29,7 +29,7 @@ export function base(opts: { legend?: boolean; zoom?: boolean } = {}) {
   return {
     backgroundColor: 'transparent',
     textStyle: { fontFamily: 'Inter, ui-sans-serif, sans-serif', color: BRAND.text },
-    grid: { top: legend ? 56 : 28, right: 24, bottom: zoom ? 64 : 44, left: 60, containLabel: true },
+    grid: { top: legend ? 56 : 36, right: 24, bottom: zoom ? 60 : 44, left: 60, containLabel: true },
     legend: legend
       ? {
           top: 12,
@@ -47,15 +47,31 @@ export function base(opts: { legend?: boolean; zoom?: boolean } = {}) {
       borderColor: BRAND.grid,
       borderWidth: 1,
       textStyle: { color: '#e6f1f8', fontSize: 12 },
-      axisPointer: { type: 'line', lineStyle: { color: BRAND.blue, opacity: 0.5 } },
+      axisPointer: { type: 'cross', lineStyle: { color: BRAND.blue, opacity: 0.5 }, crossStyle: { color: BRAND.blue, opacity: 0.5 } },
     },
+    toolbox: zoom
+      ? {
+          right: 14,
+          top: 8,
+          itemSize: 14,
+          iconStyle: { borderColor: BRAND.textDim },
+          emphasis: { iconStyle: { borderColor: BRAND.blue } },
+          feature: {
+            // drag a rectangle to zoom both axes; thin box = one-axis zoom
+            dataZoom: { yAxisIndex: 0, title: { zoom: 'box zoom', back: 'undo zoom' } },
+            restore: { title: 'reset' },
+          },
+        }
+      : undefined,
     dataZoom: zoom
       ? [
-          { type: 'inside', filterMode: 'none' },
+          { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+          { type: 'inside', yAxisIndex: 0, filterMode: 'none' },
           {
             type: 'slider',
-            height: 18,
-            bottom: 28,
+            xAxisIndex: 0,
+            height: 16,
+            bottom: 26,
             borderColor: BRAND.grid,
             backgroundColor: 'rgba(0,26,44,0.6)',
             fillerColor: 'rgba(0,179,255,0.15)',

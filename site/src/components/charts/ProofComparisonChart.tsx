@@ -44,7 +44,7 @@ export default function ProofComparisonChart({ data, pendingMults = [], theory =
     const legendData = [...BARS.map((b) => b.label), ...(theory.length ? ['theory (log₁₆)'] : [])];
 
     return {
-      ...base({ legend: true }),
+      ...base({ legend: true, zoom: true }),
       legend: { ...base({ legend: true }).legend, data: legendData },
       tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? '—' : `${(v / 1024).toFixed(2)} KB`) },
       xAxis: catAxis('', { data: cats }),
