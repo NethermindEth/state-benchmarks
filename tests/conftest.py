@@ -1,4 +1,12 @@
 """Make src/ modules importable from tests without packaging gymnastics."""
+# Importing locust (tests/unit/test_locustfile.py) runs gevent's
+# monkey.patch_all(); doing that after another test module has imported
+# requests/urllib3 raises RecursionError (gevent#1016). Patch first, before
+# any test module import.
+from gevent import monkey
+
+monkey.patch_all()
+
 import pathlib
 import sys
 

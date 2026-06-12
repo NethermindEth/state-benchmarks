@@ -58,12 +58,16 @@ load_test:
   wait_time:
     min: 0.1
     max: 0.5
+  # The Geth --dev node has free gas and an unlocked dev account, so the
+  # gas-paying eth_sendTransaction task is safe to run here.
+  gas_tests_enabled: true
   task_weights:
     eth_getBalance: 3
     eth_getStorageAt: 3
     eth_call: 2
     eth_getCode: 2
     eth_getProof: 1
+    eth_sendTransaction: 1
   latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
   recent_block_window: 50
   # These match the seeded addresses in scripts/seed_test_node.py.

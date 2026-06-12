@@ -34,10 +34,13 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
+      # The orchestrator drops benchmark_db_size_bytes here (textfile collector).
+      - ./textfile_metrics:/textfile:ro
     command:
       - '--path.procfs=/host/proc'
       - '--path.rootfs=/rootfs'
       - '--path.sysfs=/host/sys'
+      - '--collector.textfile.directory=/textfile'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
@@ -56,6 +59,13 @@ services:
       # OrbStack/VM hosts) — without it cAdvisor spams btrfs mountpoint warnings.
       - /dev:/dev:ro
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    # NOTE: cAdvisor (≤ v0.52.x) cannot enrich containers with `name` labels
+    # when Docker runs the containerd image store (storage driver "overlayfs"):
+    # its docker factory unconditionally reads the legacy layerdb, which that
+    # backend doesn't have, so every container fails to register and all
+    # name="benchmark_*" queries return nothing. There is no cAdvisor-side
+    # workaround; switch the daemon back to the classic store in
+    # /etc/docker/daemon.json: {"features": {"containerd-snapshotter": false}}.
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${CADVISOR_PORT:-8080}:8080"
     restart: unless-stopped

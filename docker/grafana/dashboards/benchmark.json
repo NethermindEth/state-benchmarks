@@ -277,53 +277,49 @@
       ]
     },
     {
-      "collapsed": false,
+      "id": 22,
+      "type": "stat",
+      "title": "DB size (last measured)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "gridPos": {
-        "h": 1,
-        "w": 24,
+        "h": 4,
+        "w": 6,
         "x": 0,
         "y": 17
       },
-      "id": 101,
-      "panels": [],
-      "title": "Client (Geth go-metrics)",
-      "type": "row"
-    },
-    {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Block processing latency (chain_execution)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 18
-      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 5
+          "unit": "bytes",
+          "noValue": "no measurement yet",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         }
       },
       "targets": [
@@ -333,75 +329,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chain_execution{quantile=\"0.5\"} / 1e9",
-          "legendFormat": "p50"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chain_execution{quantile=\"0.95\"} / 1e9",
-          "legendFormat": "p95"
-        },
-        {
-          "refId": "C",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chain_execution{quantile=\"0.99\"} / 1e9",
-          "legendFormat": "p99"
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Gas / sec",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 18
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 1,
-            "fillOpacity": 10
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chain_mgasps{quantile=\"0.5\"} * 1e6",
-          "legendFormat": "gas/s p50"
+          "expr": "benchmark_db_size_bytes{client=\"$client\"}",
+          "legendFormat": "db size"
         }
       ]
     },
@@ -847,7 +776,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
@@ -871,7 +801,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "locust_users",
+          "expr": "sum(locust_users) or vector(0)",
           "legendFormat": "users"
         }
       ]
@@ -923,7 +853,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "idle"
         },
         "overrides": []
       },
@@ -947,7 +878,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "locust_test_running",
+          "expr": "max(locust_test_running) or vector(0)",
           "legendFormat": "running"
         }
       ]

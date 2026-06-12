@@ -186,6 +186,32 @@ def test_measure_db_size_handles_garbage_output():
         assert runner.measure_db_size("geth") is None
 
 
+# ---------- export_db_size_metric ----------
+
+def test_export_db_size_metric_writes_textfile_atomically():
+    """The gauge goes through run_cmd (remote-safe) with a tmp+mv write."""
+    seen = []
+
+    def _fake_run(cmd, **kwargs):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(args=cmd, returncode=0)
+
+    with patch("runner.run_cmd", side_effect=_fake_run):
+        runner.export_db_size_metric("nethermind", 612000000000)
+
+    assert len(seen) == 1
+    assert seen[0][:2] == ["sh", "-c"]
+    script = seen[0][2]
+    assert 'benchmark_db_size_bytes{client="nethermind"} 612000000000' in script
+    assert ".tmp" in script and " && mv " in script
+
+
+def test_export_db_size_metric_failure_is_non_fatal(caplog):
+    with patch("runner.run_cmd", side_effect=subprocess.CalledProcessError(1, "sh")):
+        runner.export_db_size_metric("nethermind", 1)  # must not raise
+    assert any("DB size metric" in r.message for r in caplog.records if r.levelno >= 30)
+
+
 # ---------- write_sync_metrics ----------
 
 def test_write_sync_metrics_round_trip(tmp_path):

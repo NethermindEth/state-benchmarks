@@ -52,10 +52,13 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
+      # The orchestrator drops benchmark_db_size_bytes here (textfile collector).
+      - ./textfile_metrics:/textfile:ro
     command:
       - '--path.procfs=/host/proc'
       - '--path.rootfs=/rootfs'
       - '--path.sysfs=/host/sys'
+      - '--collector.textfile.directory=/textfile'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
@@ -83,6 +86,9 @@ services:
       # OrbStack/VM hosts) — without it cAdvisor spams btrfs mountpoint warnings.
       - /dev:/dev:ro
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    # See docker-compose.monitoring.yml: on containerd-image-store hosts
+    # (storage driver "overlayfs") cAdvisor cannot name-enrich containers;
+    # switch the daemon back to the classic store for name="benchmark_*" series.
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${CADVISOR_PORT:-8080}:8080"
     restart: unless-stopped

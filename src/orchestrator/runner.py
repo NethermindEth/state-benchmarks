@@ -37,6 +37,9 @@ MOCK_CL_PROC: Optional[subprocess.Popen] = None
 RPC_STARTUP_TIMEOUT = 300
 SYNC_HEAD_FRESHNESS_SEC = 120
 SEED_STATE_FILE = os.path.join("benchmarks", ".seed-state.json")
+# node_exporter scrapes this dir via --collector.textfile.directory (see
+# docker/docker-compose.monitoring.yml).
+TEXTFILE_METRICS_DIR = os.path.join("docker", "textfile_metrics")
 
 def detect_compose_cmd() -> List[str]:
     """Prefer 'docker compose' (v2 plugin); fall back to legacy 'docker-compose'.
@@ -204,27 +207,57 @@ def stop_infrastructure():
     except subprocess.CalledProcessError:
         pass
 
-def rpc_call(method: str, params: Optional[list] = None, timeout: int = 5) -> Any:
-    """Single JSON-RPC call; returns the result, or None if unreachable/errored."""
+def rpc_probe(method: str, params: Optional[list] = None, timeout: int = 5) -> tuple:
+    """Single JSON-RPC call; returns (result, error_detail).
+
+    error_detail is a human-readable reason when result is None, so callers
+    waiting on a node can report *why* it is unreachable, not just that it is.
+    """
     payload = {"jsonrpc": "2.0", "method": method, "params": params or [], "id": 1}
     try:
         response = requests.post(RPC_URL, json=payload, timeout=timeout)
         if response.status_code != 200:
-            return None
-        return response.json().get("result")
-    except (requests.exceptions.RequestException, ValueError):
-        return None
+            return None, f"HTTP {response.status_code}: {response.text[:200]!r}"
+        body = response.json()
+        if body.get("error"):
+            return None, f"JSON-RPC error: {body['error']}"
+        result = body.get("result")
+        if result is None:
+            return None, f"response has no result: {response.text[:200]!r}"
+        return result, None
+    except requests.exceptions.Timeout:
+        return None, f"no response within {timeout}s (port open but node not answering?)"
+    except requests.exceptions.ConnectionError as e:
+        return None, f"connection failed: {e}"
+    except (requests.exceptions.RequestException, ValueError) as e:
+        return None, f"{type(e).__name__}: {e}"
+
+def rpc_call(method: str, params: Optional[list] = None, timeout: int = 5) -> Any:
+    """Single JSON-RPC call; returns the result, or None if unreachable/errored."""
+    return rpc_probe(method, params, timeout)[0]
 
 def wait_for_rpc(timeout: Optional[int] = None):
     timeout = timeout if timeout is not None else RPC_STARTUP_TIMEOUT
+    logger.info(f"Waiting for RPC at {RPC_URL} (timeout: {timeout}s)...")
     start_time = time.time()
+    last_error: Optional[str] = None
+    last_log_time = start_time
     while time.time() - start_time < timeout:
-        result = rpc_call("web3_clientVersion", timeout=2)
+        result, error = rpc_probe("web3_clientVersion", timeout=2)
         if result is not None:
             logger.info(f"RPC server is up: {result}")
             return True
+        now = time.time()
+        # Log immediately when the failure mode changes, else heartbeat every 30s.
+        if error != last_error:
+            logger.info(f"RPC at {RPC_URL} not ready: {error}")
+            last_error = error
+            last_log_time = now
+        elif now - last_log_time >= 30:
+            logger.info(f"Still waiting for RPC at {RPC_URL} ({int(now - start_time)}s elapsed): {error}")
+            last_log_time = now
         time.sleep(2)
-    logger.error(f"RPC server failed to start within {timeout}s.")
+    logger.error(f"RPC at {RPC_URL} failed to respond within {timeout}s. Last error: {last_error}")
     return False
 
 def check_sync_status() -> Optional[bool]:
@@ -321,6 +354,32 @@ def measure_db_size(client: str) -> Optional[int]:
     except (subprocess.CalledProcessError, ValueError, IndexError) as e:
         logger.error(f"Failed to measure DB size: {e}")
         return None
+
+def export_db_size_metric(client: str, size_bytes: int):
+    """Publish the measured DB size to Prometheus via node_exporter's textfile collector.
+
+    Goes through run_cmd so the file lands on the docker host when ssh_command
+    is configured. Non-fatal on failure — the Grafana panel just shows the
+    previous (or no) value.
+    """
+    path = os.path.join(TEXTFILE_METRICS_DIR, "benchmark_db_size.prom")
+    content = (
+        "# HELP benchmark_db_size_bytes Client database size measured by the orchestrator"
+        " (du -sb of the nodes.data_dirs path).\n"
+        "# TYPE benchmark_db_size_bytes gauge\n"
+        f'benchmark_db_size_bytes{{client="{client}"}} {size_bytes}\n'
+    )
+    # Write tmp + mv so node_exporter never scrapes a half-written file.
+    script = (
+        f"mkdir -p {shlex.quote(TEXTFILE_METRICS_DIR)}"
+        f" && printf '%s' {shlex.quote(content)} > {shlex.quote(path + '.tmp')}"
+        f" && mv {shlex.quote(path + '.tmp')} {shlex.quote(path)}"
+    )
+    try:
+        run_cmd(["sh", "-c", script])
+        logger.info(f'Exported benchmark_db_size_bytes{{client="{client}"}} = {size_bytes}')
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        logger.warning(f"Could not export DB size metric: {e}")
 
 def write_sync_metrics(milestone_dir: str, client: str, sync_time: Optional[float], db_size: Optional[int]):
     """Persist what the runner measured directly so the aggregator can merge it."""
@@ -430,6 +489,8 @@ def run_benchmark_for_client(client: str, milestone: str, skip_sync: bool, confi
             db_size = prev_db_size
 
         write_sync_metrics(milestone_dir, client, sync_time, db_size)
+        if db_size is not None:
+            export_db_size_metric(client, db_size)
 
         run_locust_load_test(config_path, milestone_dir, client)
 

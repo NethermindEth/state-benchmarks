@@ -5,11 +5,11 @@ import os
 import random
 import threading
 import time
-from typing import List
+from typing import Dict, List, Optional
 
 import requests
 import yaml
-from locust import FastHttpUser, between, events
+from locust import FastHttpUser, between, events, tag
 from locust.runners import MasterRunner, WorkerRunner
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
@@ -73,7 +73,11 @@ TASK_WEIGHTS = LOAD_CFG.get("task_weights", {
     "eth_call": 2,
     "eth_getCode": 2,
     "eth_getProof": 1,
+    "eth_sendTransaction": 1,
 })
+# Gas-paying tasks (tagged "gas") spend real funds outside dev networks, so
+# they are off unless the config opts in.
+GAS_TESTS_ENABLED = bool(LOAD_CFG.get("gas_tests_enabled", False))
 
 LOCUST_LATENCY = Histogram(
     "locust_request_latency_ms",
@@ -94,8 +98,88 @@ _proof_writer = None
 _proof_rows_since_flush = 0
 
 
+# Unlocked account used by gas-paying tasks; resolved in on_test_start.
+GAS_SENDER: Optional[str] = None
+
+
 def _random_block_tag() -> str:
     return random.choice(RECENT_BLOCKS)
+
+
+def _state_available(host: str, block_hex: str) -> bool:
+    """True if the node can serve state (via eth_getBalance) at the given block."""
+    try:
+        resp = requests.post(
+            host,
+            json={
+                "jsonrpc": "2.0",
+                "method": "eth_getBalance",
+                "params": [ADDRESSES[0], block_hex],
+                "id": 1,
+            },
+            timeout=5,
+        )
+        return "error" not in resp.json()
+    except Exception:
+        return False
+
+
+def _probe_state_depth(host: str, head: int, max_depth: int) -> int:
+    """Deepest depth d (block = head - d) with state available, capped at max_depth - 1.
+
+    Pruned nodes (e.g. Nethermind with FlatDb) retain state only for a band of
+    recent blocks; older blocks fail with -32002 "No state available". Bisect
+    for the retention edge so the block window never reaches past it. Archive
+    and dev nodes pass the first probe and skip the bisect entirely.
+    """
+    hi = max(0, min(max_depth - 1, head))
+    if hi == 0 or _state_available(host, hex(head - hi)):
+        return hi
+    lo = 0  # head itself — if even head state is missing, the run is doomed anyway
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if _state_available(host, hex(head - mid)):
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _planned_run_time_sec(environment) -> int:
+    """The --run-time of this test in seconds, or 0 if unknown."""
+    raw = getattr(getattr(environment, "parsed_options", None), "run_time", None)
+    if raw is None:
+        return 0
+    try:
+        from locust.util.timespan import parse_timespan
+        return int(parse_timespan(str(raw)))
+    except Exception:
+        return 0
+
+
+def _fetch_gas_sender(host: str) -> Optional[str]:
+    """First unlocked account on the node (eth_accounts), or None."""
+    try:
+        resp = requests.post(
+            host,
+            json={"jsonrpc": "2.0", "method": "eth_accounts", "params": [], "id": 1},
+            timeout=5,
+        )
+        accounts = resp.json().get("result") or []
+        return accounts[0] if accounts else None
+    except Exception as e:
+        _logger.warning(f"Failed to fetch accounts from {host}: {e}")
+        return None
+
+
+def filter_gas_tasks(tasks: Dict, gas_enabled: bool) -> Dict:
+    """Drop tasks tagged 'gas' (via locust's @tag) unless gas tests are enabled."""
+    if gas_enabled:
+        return tasks
+    return {
+        fn: weight for fn, weight in tasks.items()
+        if "gas" not in getattr(fn, "locust_tag_set", set())
+    }
 
 
 @events.init.add_listener
@@ -151,9 +235,20 @@ def _user_count_poller(environment):
 @events.test_start.add_listener
 def on_test_start(environment, **kwargs):
     """Fetch head block and pre-compute a window of recent block tags."""
-    global RECENT_BLOCKS, _proof_file, _proof_writer
+    global RECENT_BLOCKS, GAS_SENDER, _proof_file, _proof_writer
 
     host = environment.host or "http://localhost:8545"
+
+    if GAS_TESTS_ENABLED:
+        GAS_SENDER = _fetch_gas_sender(host)
+        if GAS_SENDER:
+            _logger.info(f"Gas tests enabled; sending transactions from {GAS_SENDER}")
+        else:
+            _logger.warning(
+                "Gas tests are enabled (load_test.gas_tests_enabled) but the node "
+                "exposes no unlocked accounts — eth_sendTransaction will no-op. "
+                "Point the benchmark at a dev-mode node or disable gas tests."
+            )
     try:
         resp = requests.post(
             host,
@@ -163,6 +258,18 @@ def on_test_start(environment, **kwargs):
         head_hex = resp.json().get("result")
         head = int(head_hex, 16)
         window = max(1, min(RECENT_BLOCK_WINDOW, head))
+        depth = _probe_state_depth(host, head, window)
+        if depth + 1 < window:
+            # Pruned node: clamp to the retained band, minus a margin covering
+            # the band sliding forward while the test runs (~1 block / 12s).
+            margin = _planned_run_time_sec(environment) // 12 + 8
+            clamped = max(1, depth + 1 - margin)
+            _logger.warning(
+                f"Node only has state for the last {depth + 1} blocks "
+                f"(requested window {window}); clamping window to {clamped} "
+                f"(margin {margin} blocks for head advancing during the run)."
+            )
+            window = clamped
         RECENT_BLOCKS = [hex(head - i) for i in range(window)]
         _logger.info(f"Initialized recent-block window: head={head}, window={window}")
     except Exception as e:
@@ -256,11 +363,27 @@ class EthereumRPCUser(FastHttpUser):
                     _proof_file.flush()
                     _proof_rows_since_flush = 0
 
-    # Weights driven by load_test.task_weights in the YAML config.
-    tasks = {
-        eth_get_balance:    TASK_WEIGHTS.get("eth_getBalance", 3),
-        eth_get_storage_at: TASK_WEIGHTS.get("eth_getStorageAt", 3),
-        eth_get_code:       TASK_WEIGHTS.get("eth_getCode", 2),
-        eth_call:           TASK_WEIGHTS.get("eth_call", 2),
-        eth_get_proof:      TASK_WEIGHTS.get("eth_getProof", 1),
-    }
+    @tag("gas")
+    def eth_send_transaction(self):
+        # Submit-only (no receipt wait): we measure RPC submission latency,
+        # not mining. The node assigns nonces for its unlocked account.
+        if not GAS_SENDER:
+            return
+        tx = {
+            "from": GAS_SENDER,
+            "to": random.choice(ADDRESSES),
+            "value": "0x1",
+            "gas": "0x5208",
+        }
+        self.rpc_call("eth_sendTransaction", [tx])
+
+    # Weights driven by load_test.task_weights in the YAML config; tasks tagged
+    # "gas" are excluded unless load_test.gas_tests_enabled is true.
+    tasks = filter_gas_tasks({
+        eth_get_balance:      TASK_WEIGHTS.get("eth_getBalance", 3),
+        eth_get_storage_at:   TASK_WEIGHTS.get("eth_getStorageAt", 3),
+        eth_get_code:         TASK_WEIGHTS.get("eth_getCode", 2),
+        eth_call:             TASK_WEIGHTS.get("eth_call", 2),
+        eth_get_proof:        TASK_WEIGHTS.get("eth_getProof", 1),
+        eth_send_transaction: TASK_WEIGHTS.get("eth_sendTransaction", 1),
+    }, GAS_TESTS_ENABLED)

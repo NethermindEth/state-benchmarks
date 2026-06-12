@@ -53,3 +53,7 @@ Thumbs.db
 
 # Test caches
 .pytest_cache/
+
+# Runtime-generated node_exporter textfile metrics (benchmark_db_size_bytes)
+docker/textfile_metrics/*.prom
+docker/textfile_metrics/*.prom.tmp
