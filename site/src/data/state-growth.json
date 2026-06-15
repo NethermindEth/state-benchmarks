@@ -14,7 +14,7 @@
       "mult": 3.5, "status": "context", "measured": true, "block": 24358000,
       "totalGB": 768.2, "acctGB": 61.9, "storGB": 667.6, "codeGB": 38.8,
       "accounts": 392, "storage": 7209, "contracts": 134,
-      "accountDepth": 8.86,
+      "accountDepth": 7.62,
       "preCorrection": true,
       "label": "3.5x · inherited Bloatnet starting state — storage-skewed (8/87/5); we continue from here"
     },
