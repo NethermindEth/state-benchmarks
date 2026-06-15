@@ -34,9 +34,11 @@ stop at mainnet size, where the trie is still warm in OS page cache.
 
 ## Track 2 — Harden L1
 
-The Hegotá fork (H2 2026) is the statelessness inflection point. Verkle (or its successor)
-will be argued against an *MPT counterfactual*. That counterfactual does not currently exist
-as numbers — only as folklore.
+Statelessness is the inflection point. The state tree is being re-cut for a SNARK-friendly,
+post-quantum future: the roadmap has moved off Verkle toward a **unified binary tree
+([EIP-7864](https://eips.ethereum.org/EIPS/eip-7864))**, and the witness now feeds **zkEVM
+real-time proving** as much as it feeds light clients. Whichever tree wins is argued against an
+*MPT counterfactual* that does not currently exist as numbers — only as folklore.
 
 <Callout type="goal" title="Deliverable 2.A">
   `eth_getProof` size distributions (p50 / p95) across milestones, broken down by account vs. storage proofs. Only the mainnet (1×) baseline is sampled so far; each new milestone adds one row once its state is scanned.
@@ -67,7 +69,41 @@ framing is not a checkbox — it is a license to refuse work that doesn't fit.
 ## What this project is *not*
 
 - It is not a benchmark contest. We don't crown a winner; we publish the curves.
-- It is not a Verkle endorsement or rejection. We produce the MPT baseline; the comparison happens elsewhere.
+- It is not a tree endorsement or rejection. We produce the MPT baseline; the comparison happens elsewhere.
 - It is not a one-shot study. The infrastructure is meant to be re-run every fork.
+
+## Next Questions
+
+The road-to-10× grant answers *does it hold*, and it deliberately stops at the **MPT baseline** —
+the comparison happens elsewhere. These are the questions that pick up where it ends. Each is
+something the 5×–10× real-state pipeline is, uniquely, already positioned to measure — and each
+maps onto a protocol decision being made now rather than a hypothetical.
+
+- **The binary-tree proving payoff ([EIP-7864](https://eips.ethereum.org/EIPS/eip-7864)).** The
+  tree is ~4× deeper (arity 2 vs 16) but each node uses a SNARK-friendly hash instead of Keccak.
+  The net proving cost is the product of those two — and that product has only ever been argued
+  from theory and toy benchmarks, never measured on real state. The hash itself
+  (Poseidon2 / BLAKE3 / Keccak) is **not yet chosen**, and proving cost is the deciding criterion.
+- **The gas↔real-cost curve.** Cold `SLOAD` is priced flat (2,100 gas) regardless of state size,
+  while its real latency steps off a cliff once the working set leaves RAM — the same IO knee the
+  [Problems](/problems) page describes, expressed as a *real-cost-per-gas* slope. That slope is the
+  empirical input the state-repricing EIPs ([EIP-8037](https://eips.ethereum.org/EIPS/eip-8037) /
+  [EIP-8038](https://eips.ethereum.org/EIPS/eip-8038)) need — their gas constants are currently *TBD*.
+- **The BAL parallelism ceiling ([EIP-7928](https://eips.ethereum.org/EIPS/eip-7928)).** Block-level
+  access lists are the lever meant to take gas toward 200M via parallel state pre-fetch and parallel
+  root computation. Parallelism only helps while the bottleneck is compute; at 5–10× state it shifts
+  to random-read IOPS. Whether the speedup survives that shift is unmeasured.
+- **DB-architecture attribution.** The cross-client battery (Track 1) shows *that* clients diverge;
+  isolating *why* — RocksDB LSM read-amplification vs Pebble/PBSS path-keying vs MDBX B-tree freelist
+  vs Bonsai — turns the curves into a mechanism, and a portable lesson for the next fork.
+- **The economics of expiry.** "~80% of state is untouched >1 yr" is the premise for state expiry;
+  the unmeasured parts are the resurrection-witness cost (revive-with-proof, MPT vs binary) and
+  whether the *hot* set itself keeps growing — i.e. whether expiry bounds state or merely delays it.
+
+<Callout type="goal" title="Status">
+  These are scoping notes for a possible follow-up, not committed deliverables of the current grant.
+  Several figures behind them (Keccak vs Poseidon constraint ratio, EIP-7864 hash decision, the
+  EIP-8037/8038 gas constants) are open or fast-moving — verify against primary sources before citing.
+</Callout>
 
 </Section>
