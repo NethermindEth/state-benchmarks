@@ -28,6 +28,12 @@ CLIENTS_COMPOSE = "docker/docker-compose.clients.yml"
 DATA_DIRS: Dict[str, str] = {}
 COMPOSE_CMD: List[str] = ["docker-compose"]
 CONSENSUS = False
+# Consensus driver: "lighthouse" (real CL), "mock" (Engine-API mock CL for
+# FROZEN milestone snapshots — see src/mock_cl) or "none".
+CONSENSUS_MODE = "lighthouse"
+MOCK_CL: Dict[str, Any] = {}
+# Background mock-CL pivot driver process (snap-sync mode); None when not running.
+MOCK_CL_PROC: Optional[subprocess.Popen] = None
 RPC_STARTUP_TIMEOUT = 300
 SYNC_HEAD_FRESHNESS_SEC = 120
 SEED_STATE_FILE = os.path.join("benchmarks", ".seed-state.json")
@@ -91,6 +97,59 @@ def compose_cmd(compose_file: str) -> List[str]:
         cmd += ["--env-file", ".env"]
     return cmd + ["-f", compose_file]
 
+def build_mock_cl_command(subcommand: str, mock_cl_cfg: Dict[str, Any]) -> List[str]:
+    """Build the `uv run python -m mock_cl <subcommand> ...` argv from mock_cl config.
+
+    Pure (no side effects) so it's unit-testable. Currently supports the "pivot"
+    subcommand used to drive a frozen snapshot's snap-sync.
+    """
+    engine_url = mock_cl_cfg.get("engine_url", "http://localhost:8551")
+    jwt = mock_cl_cfg.get("jwt", "")
+    cmd = [
+        "uv", "run", "python", "-m", "mock_cl",
+        "--engine-url", str(engine_url),
+        "--jwt", str(jwt),
+        subcommand,
+    ]
+
+    if subcommand == "pivot":
+        pivot = mock_cl_cfg.get("pivot", {})
+        pivot_hash = pivot.get("hash", "")
+        cmd += ["--pivot-hash", str(pivot_hash)]
+        if pivot.get("number") is not None:
+            cmd += ["--pivot-number", str(pivot["number"])]
+        if pivot.get("interval") is not None:
+            cmd += ["--interval", str(pivot["interval"])]
+        # Poll the EL's user RPC so the pivot loop can detect a finished snap-sync.
+        cmd += ["--status-rpc", RPC_URL]
+    elif subcommand == "replay":
+        replay = mock_cl_cfg.get("replay", {})
+        cmd += ["--payloads", str(replay.get("payloads", ""))]
+        if replay.get("count") is not None:
+            cmd += ["--count", str(replay["count"])]
+        if replay.get("latency_csv"):
+            cmd += ["--latency-csv", str(replay["latency_csv"])]
+
+    return cmd
+
+
+def stop_mock_cl():
+    """Terminate the background mock-CL pivot driver if one is running."""
+    global MOCK_CL_PROC
+    if MOCK_CL_PROC is None:
+        return
+    logger.info("Stopping background mock CL driver...")
+    try:
+        MOCK_CL_PROC.terminate()
+        MOCK_CL_PROC.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        MOCK_CL_PROC.kill()
+    except Exception as e:
+        logger.warning(f"Failed to stop mock CL driver cleanly: {e}")
+    finally:
+        MOCK_CL_PROC = None
+
+
 def start_infrastructure(client: str):
     if not MANAGE_INFRA:
         logger.info("Infrastructure management is disabled in config. Skipping start.")
@@ -102,7 +161,7 @@ def start_infrastructure(client: str):
     logger.info(f"Starting {client} node...")
     run_cmd(compose_cmd(CLIENTS_COMPOSE) + ["up", "-d", client])
 
-    if CONSENSUS:
+    if CONSENSUS_MODE == "lighthouse":
         # Each EL client has a matching lighthouse-<client> service in the
         # clients compose file driving its engine API (mainnet sync needs a CL).
         cl_service = f"lighthouse-{client}"
@@ -114,11 +173,26 @@ def start_infrastructure(client: str):
                 f"Could not start {cl_service}. Without a consensus client the node "
                 "will not sync mainnet; set nodes.consensus: false to silence this."
             )
+    elif CONSENSUS_MODE == "mock":
+        # FROZEN milestone snapshot: no live CL. Launch the mock-CL pivot driver
+        # in the background so the EL snap-syncs to the configured frozen pivot.
+        # (Nethermind targets can use --Sync.StaticSnapPivot per nethermind#11943
+        # as the native alternative; in that case set consensus_mode: none.)
+        global MOCK_CL_PROC
+        cmd = build_mock_cl_command("pivot", MOCK_CL)
+        logger.info(f"Starting background mock CL pivot driver: {cmd}")
+        # `python -m mock_cl` needs src/ on PYTHONPATH (the package lives in src/).
+        mock_env = os.environ | {"PYTHONPATH": os.pathsep.join(filter(None, ["src", os.environ.get("PYTHONPATH", "")]))}
+        MOCK_CL_PROC = subprocess.Popen(cmd, env=mock_env)
+    else:
+        logger.info("consensus_mode is 'none'; not starting any consensus driver.")
 
 def stop_infrastructure():
     if not MANAGE_INFRA:
         logger.info("Infrastructure management is disabled in config. Skipping stop.")
         return
+
+    stop_mock_cl()
 
     logger.info("Stopping all containers...")
     try:
@@ -389,7 +463,7 @@ def main():
     args = parser.parse_args()
 
     global CONFIG, RPC_URL, SSH_CMD, MANAGE_INFRA, MONITORING_COMPOSE, CLIENTS_COMPOSE, DATA_DIRS, \
-        COMPOSE_CMD, CONSENSUS, RPC_STARTUP_TIMEOUT, SYNC_HEAD_FRESHNESS_SEC
+        COMPOSE_CMD, CONSENSUS, CONSENSUS_MODE, MOCK_CL, RPC_STARTUP_TIMEOUT, SYNC_HEAD_FRESHNESS_SEC
     CONFIG = load_config(args.config)
     nodes_cfg = CONFIG.get("nodes", {})
     RPC_URL = nodes_cfg.get("rpc_url", "http://localhost:8545")
@@ -401,6 +475,16 @@ def main():
     # CONSENSUS in the environment or repo-root .env overrides nodes.consensus,
     # so the same .env that configures compose can disable the lighthouse start.
     CONSENSUS = env_flag("CONSENSUS", bool(nodes_cfg.get("consensus", False)), read_env_file())
+    # Resolve the consensus driver. Explicit nodes.consensus_mode wins; otherwise
+    # fall back to the legacy boolean (truthy -> lighthouse, falsy -> none) so
+    # existing configs behave exactly as before. CONSENSUS_MODE in the env/.env
+    # overrides both.
+    default_mode = "lighthouse" if CONSENSUS else "none"
+    CONSENSUS_MODE = str(nodes_cfg.get("consensus_mode", default_mode))
+    env_mode = os.environ.get("CONSENSUS_MODE", read_env_file().get("CONSENSUS_MODE"))
+    if env_mode:
+        CONSENSUS_MODE = env_mode.strip()
+    MOCK_CL = CONFIG.get("mock_cl", {}) or {}
     RPC_STARTUP_TIMEOUT = int(nodes_cfg.get("rpc_startup_timeout_sec", 300))
     SYNC_HEAD_FRESHNESS_SEC = int(nodes_cfg.get("sync_head_freshness_sec", 120))
     COMPOSE_CMD = detect_compose_cmd() if MANAGE_INFRA else ["docker-compose"]

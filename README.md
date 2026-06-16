@@ -251,6 +251,65 @@ The Grafana dashboard updates live during the run with four rows:
 
 Tear-down: `docker compose -f docker/docker-compose.test.yml down -v` (or rerun the orchestrator with `--stop-monitoring`).
 
+## Mock consensus layer (frozen milestones)
+
+Post-merge execution-layer (EL) clients only snap-sync or execute blocks when a consensus client (CL) drives their Engine API. The **frozen milestone snapshots** this project produces (x1, x3.5, x5, x7, …) have no live CL, and a real CL such as Lighthouse cannot point an EL at a frozen, non-canonical pivot. `src/mock_cl` is a minimal Engine-API "mock CL" that supplies exactly the two functions [issue #21](https://github.com/marcindsobczak/state-benchmarks/issues/21) needs, with no extra dependencies (stdlib + `requests`; the HS256 JWT is hand-rolled).
+
+It has two modes:
+
+* **pivot** (snap-sync benchmarks) — repeatedly sends `engine_forkchoiceUpdatedV3` with `headBlockHash = safeBlockHash = finalizedBlockHash` set to a fixed frozen pivot hash, every ~12s. That single repeated FCU points a post-merge EL (Geth/Besu/Reth/Erigon) at the frozen block so it snap-syncs to that state. Unlocks the #21 snap-sync metrics: **sync wall time, network bandwidth, disk IOPS, RSS, on-disk DB size**.
+* **replay** (execution-under-head benchmarks) — for each recorded block, sends `engine_newPayloadV{1..4}` then `engine_forkchoiceUpdatedV{1..3}` to advance the head, measuring per-block processing latency. Unlocks the #21 execution metrics: **block-processing p50/p95/p99, gas/s, RSS growth**.
+
+### CLI
+
+```bash
+# Snap-sync a frozen pivot (Ctrl-C to stop; --status-rpc lets it detect "synced"):
+PYTHONPATH=src uv run python -m mock_cl \
+  --engine-url http://localhost:8551 --jwt /path/to/jwt.hex \
+  pivot --pivot-hash 0x7845cf57…e31f0ca --pivot-number 24546596 \
+  --interval 12 --status-rpc http://localhost:8545
+
+# Replay recorded payloads to drive execution under a live head:
+PYTHONPATH=src uv run python -m mock_cl \
+  --engine-url http://localhost:8551 --jwt /path/to/jwt.hex \
+  replay --payloads payloads/x5.jsonl --latency-csv benchmarks/x5/replay_latency.csv
+
+# Best-effort record blocks from a live EL into a JSONL payload file:
+PYTHONPATH=src uv run python -m mock_cl --jwt /path/to/jwt.hex \
+  record --source-rpc http://localhost:8545 --start 24358001 --count 1000 --out payloads/x5.jsonl
+```
+
+> **Cancun+ recording limitation**: `eth_getBlockByNumber` cannot return blob versioned-hashes or `parentBeaconBlockRoot`, which `engine_newPayloadV3/V4` require. `record` logs a warning and omits them; for Cancun+ replay you need a CL-recorded payload source. Pre-Cancun (V1/V2) replay works from `record` output directly.
+
+### Config + orchestrator integration
+
+Set the consensus driver in `config.yml` under `nodes:` and configure the driver under the top-level `mock_cl:` section:
+
+```yaml
+nodes:
+  # "lighthouse" (real CL, default when consensus: true), "mock", or "none".
+  consensus_mode: "mock"
+
+mock_cl:
+  engine_url: "http://localhost:8551"
+  jwt: ""                 # path to jwt.hex OR a raw 0x/hex secret
+  mode: "pivot"           # "pivot" | "replay"
+  pivot:
+    hash: ""              # frozen pivot block hash
+    number: null
+    interval: 12
+  replay:
+    payloads: ""
+    count: null
+    latency_csv: ""
+```
+
+Back-compat: if `consensus_mode` is unset, the legacy boolean is used (`consensus: true` → lighthouse, `false` → none). `CONSENSUS_MODE` in the process environment or repo-root `.env` overrides the config. When `consensus_mode: "mock"`, the orchestrator starts the EL only (no Lighthouse) and launches the pivot driver in the background so the frozen target snap-syncs; it is terminated on tear-down.
+
+### Nethermind native alternative
+
+For **Nethermind** targets, `--Sync.StaticSnapPivot` ([nethermind#11943](https://github.com/NethermindEth/nethermind/pull/11943)) is the client-native equivalent of pivot mode: Nethermind pins the snap-sync pivot internally without an external FCU loop. In that case set `consensus_mode: none` and pass the flag to Nethermind instead.
+
 ## Testing
 
 The suite uses **pytest** (declared in `pyproject.toml` under `[dependency-groups].dev`). The `integration` marker is registered in `[tool.pytest.ini_options]` and excluded by default via `addopts`, so a casual `uv run pytest` is fast and Docker-free.

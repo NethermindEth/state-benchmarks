@@ -13,6 +13,11 @@ nodes:
   # nodes. Overridable without editing this file via CONSENSUS=true|false in
   # the repo-root .env (or the process environment).
   consensus: true
+  # Consensus driver: "lighthouse" (real CL, default when consensus: true),
+  # "mock" (Engine-API mock CL for FROZEN milestone snapshots — see src/mock_cl),
+  # or "none". Back-compat: if unset, consensus: true -> lighthouse, false -> none.
+  # Overridable via CONSENSUS_MODE in the process environment or repo-root .env.
+  consensus_mode: "lighthouse"
   # How long to wait for the client's JSON-RPC to come up after `docker compose up`.
   rpc_startup_timeout_sec: 300
   # Sync is only considered complete when eth_syncing is false AND the head
@@ -125,3 +130,22 @@ load_test:
     - "0x313ce567"  # decimals()
     - "0x95d89b41"  # symbol()
     - "0x06fdde03"  # name()
+
+# Mock consensus layer (Engine-API driver) for FROZEN milestone snapshots.
+# Only used when nodes.consensus_mode is "mock". Post-merge EL clients won't
+# snap-sync or execute blocks without a CL driving their Engine API; a frozen
+# snapshot has no live CL, so this drives it directly. See src/mock_cl.
+# NOTE: for Nethermind targets, --Sync.StaticSnapPivot (nethermind#11943) is the
+# native alternative to pivot mode — set consensus_mode: none and pass that flag.
+mock_cl:
+  engine_url: "http://localhost:8551"   # EL Engine API endpoint (authrpc)
+  jwt: ""                                # path to jwt.hex OR a raw 0x/hex secret
+  mode: "pivot"                          # "pivot" (snap-sync) | "replay" (execution)
+  pivot:
+    hash: ""                             # frozen pivot block hash (0x...)
+    number: null                         # frozen pivot block number (optional)
+    interval: 12                         # seconds between forkchoiceUpdated ticks
+  replay:
+    payloads: ""                         # JSONL payloads file (see src/mock_cl/payloads.py)
+    count: null                          # replay at most this many blocks (null = all)
+    latency_csv: ""                      # write per-block latency rows here (optional)
