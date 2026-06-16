@@ -28,15 +28,15 @@ and move toward statelessness.
 
 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 not-prose my-6">
   <Stat value="3.5×" label="picked up here" sub="inherited Bloatnet state" />
-  <Stat measured value="5×" label="reached" sub="1.11 TB of state, June 2026" />
-  <Stat value="7×" label="in progress" sub="bloating run underway" />
+  <Stat measured value="5×" label="reached" sub="1.11 TB of state" />
+  <Stat measured value="7×" label="reached" sub="1.55 TB of state, June 2026" />
   <Stat value="10×" label="final target" sub="the headline goal" />
 </div>
 
-We took the existing ~3.5× Bloatnet state and continued growing it to 5× — this time steering the
-state's *shape* (the mix of accounts, storage, and contract code) to match real mainnet, so each
-size is a fair comparison. Real mainnet (1×) is our measured reference point, not a state we
-generated. 7× and 10× come next, followed by the cross-client benchmark round.
+We took the existing ~3.5× Bloatnet state and grew it through 5× and 7× — steering the state's
+*shape* (the mix of accounts, storage, and contract code) to match real mainnet, so each size is a
+fair comparison. Real mainnet (1×) is our measured reference point, not a state we generated. 10×
+comes next, followed by the cross-client benchmark round.
 
 ## The team
 
@@ -50,8 +50,8 @@ The ~3.5× state we start from is the **Bloatnet initiative** — a community ef
 **Stateless Consensus** team and **EthPandaOps**, who built the bloated devnet and the
 [`spamoor`](https://github.com/ethpandaops/spamoor) transaction tool used to grow it (public
 write-up by [Carlos Pérez](https://cperezz.github.io/bloatnet-website/)). This project takes that
-state and carries it further — to 5× and beyond — with mainnet-faithful composition and
-cross-client measurement.
+state and carries it further — through 5× and 7×, toward 10× — with mainnet-faithful composition
+and cross-client measurement.
 
 ## Mainnet, in numbers
 

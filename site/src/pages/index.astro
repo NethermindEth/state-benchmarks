@@ -36,7 +36,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
         </h1>
         <p class="mt-6 text-lg md:text-xl text-ink-300 max-w-2xl">
           Mainnet is 381M accounts, 1.56B storage slots, 221 GB of trie. We pick up an existing
-          ~3.5× Bloatnet and a Go controller drives it further — past <span class="text-white font-medium">5× (1.11 TB)</span>
+          ~3.5× Bloatnet and a Go controller drives it further — past <span class="text-white font-medium">7× (1.55 TB)</span>
           toward 10× — benchmarking proof sizes, block execution, and snap sync across five EL
           clients to turn the gas-limit debate into a data problem.
         </p>
@@ -83,8 +83,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
   >
     <div class="grid md:grid-cols-3 gap-6">
       <Card title="① Bloated states, reproducibly">
-        Starting from the inherited ~3.5× Bloatnet, a Go controller grows the state through 5×
-        (reached), 7×, 10×. Every run emits a portable <code>payloads.rlp</code> stream + manifest,
+        Starting from the inherited ~3.5× Bloatnet, a Go controller grows the state through 5× and
+        7× (reached) toward 10×. Every run emits a portable <code>payloads.rlp</code> stream + manifest,
         so any client can replay the exact state and verify the final root.
       </Card>
       <Card title="② Cross-client measurement">
@@ -104,7 +104,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
   <Section
     eyebrow="State growth"
     title="The curve we are climbing."
-    intro="Three milestones are measured exactly — mainnet (1×, our reference), the inherited 3.5× Bloatnet state, and the 5× state we grew it to (1.11 TB). 7× and 10× are empty slots until generated. No projected numbers."
+    intro="Four milestones are measured exactly — mainnet (1×, our reference), the inherited 3.5× Bloatnet state, and the 5× and 7× states we grew it to (1.55 TB at 7×). 10× is an empty slot until generated. No projected numbers."
   >
     <div class="rounded-2xl border border-ink-800 bg-ink-900/40 p-6">
       <StateGrowthChart client:visible data={growth.milestones} />

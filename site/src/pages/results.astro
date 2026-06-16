@@ -18,7 +18,7 @@ import depth from '../data/trie-depth.json';
 import slots from '../data/slot-histogram.json';
 
 const m1 = growth.milestones.find((m) => m.mult === 1)!;
-const m5 = growth.milestones.find((m) => m.mult === 5)!;
+const m7 = growth.milestones.find((m) => m.mult === 7)!;
 const fmtTB = (gb: number) => (gb >= 1000 ? `${(gb / 1000).toFixed(2)} TB` : `${Math.round(gb)} GB`);
 const share = (part: number, total: number) => `${((part / total) * 100).toFixed(0)}%`;
 ---
@@ -26,13 +26,13 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
   <Section
     eyebrow="Results"
     title="What we've measured."
-    intro="Three milestones carry exact full-scan data — mainnet (1×, our reference), the inherited 3.5× Bloatnet starting state, and the 5× state we grew it to. 7× and 10× are shown as empty slots until generated. No projected numbers."
+    intro="Four milestones carry exact full-scan data — mainnet (1×, our reference), the inherited 3.5× Bloatnet starting state, and the 5× and 7× states we grew it to. 10× is shown as an empty slot until generated. No projected numbers."
   >
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <Stat measured value={fmtTB(m5.totalGB)} label="State at 5×" sub={`${(m5.totalGB / m1.totalGB).toFixed(2)}× mainnet`} />
-      <Stat measured value={`${(m5.accounts / 1000).toFixed(2)}B`} label="Accounts at 5×" sub={`${m1.accounts}M at mainnet`} />
-      <Stat measured value={`${(m5.storage / 1000).toFixed(2)}B`} label="Storage slots at 5×" sub={`${(m1.storage / 1000).toFixed(2)}B at mainnet`} />
-      <Stat measured value={`${share(m5.storGB, m5.totalGB)}/${share(m5.acctGB, m5.totalGB)}/${share(m5.codeGB, m5.totalGB)}`} label="storage / acct / code" sub="composition ≈ mainnet" />
+      <Stat measured value={fmtTB(m7.totalGB)} label="State at 7×" sub={`${(m7.totalGB / m1.totalGB).toFixed(3)}× mainnet`} />
+      <Stat measured value={`${(m7.accounts / 1000).toFixed(2)}B`} label="Accounts at 7×" sub={`${m1.accounts}M at mainnet`} />
+      <Stat measured value={`${(m7.storage / 1000).toFixed(2)}B`} label="Storage slots at 7×" sub={`${(m1.storage / 1000).toFixed(2)}B at mainnet`} />
+      <Stat measured value={`${share(m7.storGB, m7.totalGB)}/${share(m7.acctGB, m7.totalGB)}/${share(m7.codeGB, m7.totalGB)}`} label="storage / acct / code" sub="composition ≈ mainnet" />
     </div>
 
     <div class="mt-12 grid grid-cols-1 gap-12">
@@ -46,18 +46,18 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Account-trie depth across milestones">
-        <p class="text-sm text-ink-400 mb-4">Where account leaves sit in the trie, per milestone. 1× and 3.5× nearly coincide (similar account counts), while 5× shifts a level deeper — depth tracks account count, the log₁₆ law. 7× and 10× pending.</p>
+        <p class="text-sm text-ink-400 mb-4">Where account leaves sit in the trie, per milestone. 1× and 3.5× nearly coincide (similar account counts), while 5× and 7× shift progressively deeper — depth tracks account count, the log₁₆ law. 10× pending.</p>
         <TrieDepthChart client:visible levels={depth.levels} series={depth.series} pending={depth.pending} />
       </Card>
 
       <Card title="Storage-trie depth across milestones">
-        <p class="text-sm text-ink-400 mb-4">The mirror image of account depth. Mainnet storage tries are shallow (most contracts hold 1–3 slots), but 3.5× and 5× pile up at depth 9 — the storage-spam mega-tries. 7× and 10× pending.</p>
+        <p class="text-sm text-ink-400 mb-4">The mirror image of account depth. Mainnet storage tries are shallow (most contracts hold 1–3 slots), but 3.5× / 5× / 7× pile up at depth 9 — the storage-spam mega-tries, deepening each milestone. 10× pending.</p>
         <TrieDepthChart client:visible levels={depth.storageDepth.levels} series={depth.storageDepth.series} pending={depth.storageDepth.pending} />
         <p class="mt-4 text-sm text-ink-400">{depth.storageDepth.note}</p>
       </Card>
 
       <Card title="Storage slots per contract — the long tail">
-        <p class="text-sm text-ink-400 mb-4">Contracts by how many storage slots they own (log scale), per milestone. ~87% own 1–3 slots; a ~4k tail owns 16k+ and dominates storage bytes. 7× and 10× pending.</p>
+        <p class="text-sm text-ink-400 mb-4">Contracts by how many storage slots they own (log scale), per milestone. ~87% own 1–3 slots; a ~4k tail owns 16k+ and dominates storage bytes. 10× pending.</p>
         <SlotHistogramChart client:visible buckets={slots.buckets} series={slots.series} pending={slots.pending} />
         <p class="mt-4 text-sm text-ink-400">{slots.note}</p>
       </Card>
@@ -68,7 +68,7 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
           client:visible
           data={proofs.series}
           pendingMults={proofs.pendingMults}
-          theory={[{ mult: 1, y: 3820 }, { mult: 3.5, y: 3825 }, { mult: 5, y: 4083 }]}
+          theory={[{ mult: 1, y: 3820 }, { mult: 3.5, y: 3825 }, { mult: 5, y: 4083 }, { mult: 7, y: 4136 }]}
         />
         <p class="mt-4 text-sm text-ink-400">Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why 3.5× (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher. {proofs.finding}</p>
       </Card>

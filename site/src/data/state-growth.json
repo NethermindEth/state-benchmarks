@@ -26,8 +26,11 @@
       "label": "5.0x · measured, rebloated to true ratio (2026-06-03)"
     },
     {
-      "mult": 7.0, "status": "in-progress", "measured": false, "pending": true, "slotNote": "in progress",
-      "label": "7.0x · bloating run underway — not yet measured"
+      "mult": 7.0, "status": "done", "measured": true, "block": 24641589,
+      "totalGB": 1550.0, "acctGB": 422.8, "storGB": 1033.4, "codeGB": 93.8,
+      "accounts": 2769, "storage": 10374, "contracts": 419,
+      "accountDepth": 8.32, "branchOccupancy": 4.08,
+      "label": "7.0x · measured exact 7× (2026-06-15) — 1.55 TB, 7.001× mainnet"
     },
     {
       "mult": 10.0, "status": "target", "measured": false, "pending": true, "slotNote": "not generated",
@@ -40,5 +43,5 @@
     "storage": "millions of storage slots",
     "codeGB": "GB of contract bytecode"
   },
-  "note": "1×, 3.5×, and 5× are exact sidecar full-scan measurements (state-benchmarks issues #5, #29, and the inherited x3.5 statecomp scan @ block 24,358,000). 3.5× is the inherited Bloatnet starting state — storage-skewed and off-ratio. 7× and 10× are empty slots until generated and scanned."
+  "note": "1×, 3.5×, 5×, and 7× are exact sidecar full-scan measurements (state-benchmarks issues #5, #29, #35, and the inherited x3.5 statecomp scan @ block 24,358,000). 3.5× is the inherited Bloatnet starting state — storage-skewed and off-ratio; 5× and 7× hold the true mainnet composition. 10× is an empty slot until generated and scanned."
 }

@@ -1,28 +1,29 @@
 {
   "metric": "number of contracts owning N storage slots, by bucket",
-  "source": "mainnet #5 (block 24,927,663); 3.5× PRISTINE statecomp scan (block 24,358,000); 5× #29 (block 24,546,596). Exact slotCountHistogram from the sidecar full scan.",
+  "source": "mainnet #5 (block 24,927,663); 3.5× PRISTINE statecomp scan (block 24,358,000); 5× #29 (block 24,546,596); 7× #35 (block 24,641,589). Exact slotCountHistogram from the sidecar full scan.",
   "series": [
     { "key": "x1",  "label": "1× mainnet", "color": "#00b3ff" },
     { "key": "x35", "label": "3.5×",       "color": "#ff9900" },
-    { "key": "x5",  "label": "5×",          "color": "#34d399" }
+    { "key": "x5",  "label": "5×",          "color": "#34d399" },
+    { "key": "x7",  "label": "7×",          "color": "#c084fc" }
   ],
-  "pending": ["7×", "10×"],
+  "pending": ["10×"],
   "buckets": [
-    { "bucket": "1",      "x1": 18210124, "x35": 16624924, "x5": 16624530 },
-    { "bucket": "2-3",    "x1": 4038607,  "x35": 4666088,  "x5": 4665994 },
-    { "bucket": "4-7",    "x1": 2396672,  "x35": 1779966,  "x5": 1779917 },
-    { "bucket": "8-15",   "x1": 706808,   "x35": 589050,   "x5": 589036 },
-    { "bucket": "16-31",  "x1": 254945,   "x35": 226738,   "x5": 226727 },
-    { "bucket": "32-63",  "x1": 159909,   "x35": 144471,   "x5": 144468 },
-    { "bucket": "64-127", "x1": 107737,   "x35": 99250,    "x5": 99249 },
-    { "bucket": "128-255","x1": 65963,    "x35": 60465,    "x5": 60463 },
-    { "bucket": "256-511","x1": 43612,    "x35": 43084,    "x5": 43083 },
-    { "bucket": "512-1k", "x1": 28057,    "x35": 25920,    "x5": 25918 },
-    { "bucket": "1k-2k",  "x1": 18498,    "x35": 17189,    "x5": 17189 },
-    { "bucket": "2k-4k",  "x1": 11977,    "x35": 11151,    "x5": 11151 },
-    { "bucket": "4k-8k",  "x1": 7598,     "x35": 7116,     "x5": 7115 },
-    { "bucket": "8k-16k", "x1": 4421,     "x35": 4115,     "x5": 4116 },
-    { "bucket": "16k+",   "x1": 4360,     "x35": 4095,     "x5": 4093 }
+    { "bucket": "1",      "x1": 18210124, "x35": 16624924, "x5": 16624530, "x7": 14358324 },
+    { "bucket": "2-3",    "x1": 4038607,  "x35": 4666088,  "x5": 4665994,  "x7": 4030290 },
+    { "bucket": "4-7",    "x1": 2396672,  "x35": 1779966,  "x5": 1779917,  "x7": 1537127 },
+    { "bucket": "8-15",   "x1": 706808,   "x35": 589050,   "x5": 589036,   "x7": 509166 },
+    { "bucket": "16-31",  "x1": 254945,   "x35": 226738,   "x5": 226727,   "x7": 195946 },
+    { "bucket": "32-63",  "x1": 159909,   "x35": 144471,   "x5": 144468,   "x7": 124647 },
+    { "bucket": "64-127", "x1": 107737,   "x35": 99250,    "x5": 99249,    "x7": 85612 },
+    { "bucket": "128-255","x1": 65963,    "x35": 60465,    "x5": 60463,    "x7": 52337 },
+    { "bucket": "256-511","x1": 43612,    "x35": 43084,    "x5": 43083,    "x7": 37217 },
+    { "bucket": "512-1k", "x1": 28057,    "x35": 25920,    "x5": 25918,    "x7": 22278 },
+    { "bucket": "1k-2k",  "x1": 18498,    "x35": 17189,    "x5": 17189,    "x7": 14821 },
+    { "bucket": "2k-4k",  "x1": 11977,    "x35": 11151,    "x5": 11151,    "x7": 9654 },
+    { "bucket": "4k-8k",  "x1": 7598,     "x35": 7116,     "x5": 7115,     "x7": 6115 },
+    { "bucket": "8k-16k", "x1": 4421,     "x35": 4115,     "x5": 4116,     "x7": 3571 },
+    { "bucket": "16k+",   "x1": 4360,     "x35": 4095,     "x5": 4093,     "x7": 3554 }
   ],
-  "note": "~87% of contracts own 1–3 slots; a tail of ~4k own 16k+. All three milestones nearly overlap — the per-contract slot-count shape is preserved as the state grows. But the open \"16k+\" bucket hides where the bloat actually goes: those tail contracts balloon into storage-spam mega-tries, which the storage-trie depth chart above exposes. 7× and 10× are pending."
+  "note": "~87% of contracts own 1–3 slots; a tail of ~4k own 16k+. All milestones nearly overlap — the per-contract slot-count shape is preserved as the state grows. But the open \"16k+\" bucket hides where the bloat actually goes: those ~3,554 tail contracts balloon into storage-spam mega-tries (they hold the bulk of x7's 10.37B slots), which the storage-trie depth chart above exposes. 10× is pending."
 }
