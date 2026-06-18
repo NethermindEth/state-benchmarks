@@ -1,0 +1,79 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Section from '../components/Section.astro';
+import prs from '../data/prs.json';
+
+const STATUS: Record<string, { label: string; dot: string; badge: string }> = {
+  merged: { label: 'merged', dot: 'bg-signal-good',  badge: 'bg-signal-good/15 text-signal-good' },
+  open:   { label: 'open',   dot: 'bg-accent-500',   badge: 'bg-accent-500/15 text-accent-400' },
+  draft:  { label: 'draft',  dot: 'bg-ink-500',      badge: 'bg-ink-800 text-ink-300' },
+};
+const REPO_TAG: Record<string, string> = {
+  nethermind: 'nethermind',
+  'state-benchmarks': 'state-benchmarks',
+  'eth-perf-research': 'eth-perf-research',
+};
+const monthName = (d: string) =>
+  new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const dayLabel = (d: string) =>
+  new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+// group preserving the data's newest-first order
+const months: { name: string; items: typeof prs.prs }[] = [];
+for (const pr of prs.prs) {
+  const m = monthName(pr.date);
+  let bucket = months.find((x) => x.name === m);
+  if (!bucket) { bucket = { name: m, items: [] }; months.push(bucket); }
+  bucket.items.push(pr);
+}
+
+const counts = {
+  merged: prs.prs.filter((p) => p.status === 'merged').length,
+  open: prs.prs.filter((p) => p.status === 'open').length,
+  draft: prs.prs.filter((p) => p.status === 'draft').length,
+};
+const authors = [...new Set(prs.prs.map((p) => p.author))];
+---
+<BaseLayout title="Timeline" description="Development timeline — the project pull requests across Nethermind, the orchestrator, and the benchmark repo.">
+  <Section
+    eyebrow="Timeline"
+    title="How the rig got built."
+    intro="The project's pull requests across the three repos, newest first. Engine instrumentation and snap-sync land in Nethermind; the orchestrator and benchmark tooling live in their own repos. Closed-without-merge PRs are omitted."
+  >
+    <div class="flex flex-wrap gap-3 text-sm">
+      <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1"><span class="size-2 rounded-full bg-signal-good"></span>{counts.merged} merged</span>
+      {counts.open > 0 && <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1"><span class="size-2 rounded-full bg-accent-500"></span>{counts.open} open</span>}
+      <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1"><span class="size-2 rounded-full bg-ink-500"></span>{counts.draft} draft</span>
+      <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1 text-ink-400">contributors: {authors.join(', ')}</span>
+    </div>
+
+    <div class="mt-10">
+      {months.map((month) => (
+        <div class="mb-10">
+          <h3 class="font-display text-lg text-accent-400 mb-4">{month.name}</h3>
+          <ol class="relative border-l border-ink-800 ml-2">
+            {month.items.map((pr) => {
+              const s = STATUS[pr.status] ?? STATUS.draft;
+              return (
+                <li class="relative pl-6 pb-6 last:pb-0">
+                  <span class:list={['absolute -left-[5px] top-1.5 size-2.5 rounded-full ring-4 ring-ink-950', s.dot]}></span>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span class="font-mono text-xs text-ink-500 tabular-nums">{dayLabel(pr.date)}</span>
+                    <span class="font-mono text-xs px-1.5 py-0.5 rounded bg-ink-900 border border-ink-800 text-ink-400">{REPO_TAG[pr.repo]}</span>
+                    <span class:list={['font-mono text-xs px-1.5 py-0.5 rounded', s.badge]}>{s.label}</span>
+                  </div>
+                  <a href={pr.url} target="_blank" rel="noreferrer noopener" class="mt-1.5 block text-ink-100 hover:text-accent-400 transition-colors">
+                    <span class="font-mono text-ink-500">#{pr.number}</span> {pr.title}
+                  </a>
+                  <div class="mt-0.5 text-xs text-ink-500">{pr.author}</div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ))}
+    </div>
+
+    <p class="mt-6 text-sm text-ink-400">{prs.note}</p>
+  </Section>
+</BaseLayout>
