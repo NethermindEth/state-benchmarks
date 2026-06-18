@@ -5,10 +5,12 @@
     "state-benchmarks": "NethermindEth/state-benchmarks",
     "eth-perf-research": "NethermindEth/eth-perf-research",
     "execution-apis": "ethereum/execution-apis",
-    "execution-specs": "ethereum/execution-specs"
+    "execution-specs": "ethereum/execution-specs",
+    "go-ethereum": "ethereum/go-ethereum"
   },
   "prs": [
     { "date": "2026-06-18", "repo": "nethermind", "number": 12059, "status": "draft",  "author": "AnkushinDaniil", "title": "rlpx: snapshot MaxFrameSize per Encode to prevent torn-read frame corruption", "url": "https://github.com/NethermindEth/nethermind/pull/12059" },
+    { "date": "2026-06-17", "repo": "go-ethereum", "number": 35189, "status": "draft", "author": "AnkushinDaniil", "title": "eth/downloader, cmd: add --snap.skipreceipts for state-only snap sync", "url": "https://github.com/ethereum/go-ethereum/pull/35189" },
     { "date": "2026-06-16", "repo": "state-benchmarks", "number": 36, "status": "merged", "author": "AnkushinDaniil", "title": "Mock consensus layer (Engine-API driver) for frozen-milestone snap-sync + replay", "url": "https://github.com/NethermindEth/state-benchmarks/pull/36" },
     { "date": "2026-06-12", "repo": "nethermind", "number": 11981, "status": "merged", "author": "AnkushinDaniil", "title": "Merge.Plugin: produce testing_commitBlockV1 blocks on the main world state", "url": "https://github.com/NethermindEth/nethermind/pull/11981" },
     { "date": "2026-06-12", "repo": "state-benchmarks", "number": 34, "status": "draft", "author": "dmitriy-b", "title": "Locust-based benchmarking framework", "url": "https://github.com/NethermindEth/state-benchmarks/pull/34" },
