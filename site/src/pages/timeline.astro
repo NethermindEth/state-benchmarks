@@ -12,6 +12,8 @@ const REPO_TAG: Record<string, string> = {
   nethermind: 'nethermind',
   'state-benchmarks': 'state-benchmarks',
   'eth-perf-research': 'eth-perf-research',
+  'execution-apis': 'ethereum/execution-apis',
+  'execution-specs': 'ethereum/execution-specs',
 };
 const monthName = (d: string) =>
   new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -44,7 +46,7 @@ const authors = [...new Set(prs.prs.map((p) => p.author))];
       <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1"><span class="size-2 rounded-full bg-signal-good"></span>{counts.merged} merged</span>
       {counts.open > 0 && <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1"><span class="size-2 rounded-full bg-accent-500"></span>{counts.open} open</span>}
       <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1"><span class="size-2 rounded-full bg-ink-500"></span>{counts.draft} draft</span>
-      <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1 text-ink-400">contributors: {authors.join(', ')}</span>
+      <span class="inline-flex items-center gap-2 rounded-full border border-ink-800 px-3 py-1 text-ink-400">contributors: {authors.map((a) => `@${a}`).join(', ')}</span>
     </div>
 
     <div class="mt-10">
@@ -65,7 +67,7 @@ const authors = [...new Set(prs.prs.map((p) => p.author))];
                   <a href={pr.url} target="_blank" rel="noreferrer noopener" class="mt-1.5 block text-ink-100 hover:text-accent-400 transition-colors">
                     <span class="font-mono text-ink-500">#{pr.number}</span> {pr.title}
                   </a>
-                  <div class="mt-0.5 text-xs text-ink-500">{pr.author}</div>
+                  <a href={`https://github.com/${pr.author}`} target="_blank" rel="noreferrer noopener" class="mt-0.5 inline-block font-mono text-xs text-ink-500 hover:text-accent-400">@{pr.author}</a>
                 </li>
               );
             })}
