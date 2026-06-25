@@ -57,7 +57,14 @@ services:
       - --Init.NetworkId=12159
       # FlatDb state layout the snapshot was written with — must match the image.
       - --FlatDb.Enabled=true
-      - --FlatDb.MaxReorgDepth=192
+      # Queryable historical-state window for FlatDb: eth_getStorageAt/eth_call
+      # against a block older than this return "No state available"
+      # (FlatDbManager.GatherReadOnlySnapshotBundle). The steady-state depth
+      # tracks MinReorgDepth, so raise both well above load_test.recent_block_window
+      # (1000) so Locust's pinned recent blocks don't age out as replay advances
+      # the head. Costs memory — each retained block keeps a state snapshot bundle.
+      - --FlatDb.MinReorgDepth=1024
+      - --FlatDb.MaxReorgDepth=2048
       - --Pruning.Mode=None
       - --JsonRpc.Enabled=true
       - --JsonRpc.Host=0.0.0.0
