@@ -6,14 +6,14 @@
     {
       "mult": 1.0, "status": "baseline", "measured": true, "block": 24927663,
       "totalGB": 221.4, "acctGB": 60.4, "storGB": 147.5, "codeGB": 13.4,
-      "accounts": 381, "storage": 1557, "contracts": 75.9,
-      "accountDepth": 7.61, "branchOccupancy": 3.70,
+      "accounts": 381, "storage": 1557,
+      "accountDepth": 7.61,
       "label": "1.0x · measured mainnet (2026-05-05)"
     },
     {
       "mult": 3.5, "status": "context", "measured": true, "block": 24358000,
       "totalGB": 768.2, "acctGB": 61.9, "storGB": 667.6, "codeGB": 38.8,
-      "accounts": 392, "storage": 7209, "contracts": 134,
+      "accounts": 392, "storage": 7209,
       "accountDepth": 7.62,
       "preCorrection": true,
       "label": "3.5x · inherited Bloatnet starting state — storage-skewed (8/87/5); we continue from here"
@@ -21,22 +21,22 @@
     {
       "mult": 5.0, "status": "done", "measured": true, "block": 24546596,
       "totalGB": 1109.6, "acctGB": 304.0, "storGB": 736.0, "codeGB": 69.6,
-      "accounts": 1993, "storage": 7790, "contracts": 357,
-      "accountDepth": 8.20, "branchOccupancy": 4.13,
+      "accounts": 1993, "storage": 7790,
+      "accountDepth": 8.20,
       "label": "5.0x · measured, rebloated to true ratio (2026-06-03)"
     },
     {
       "mult": 7.0, "status": "done", "measured": true, "block": 24641589,
       "totalGB": 1550.0, "acctGB": 422.8, "storGB": 1033.4, "codeGB": 93.8,
-      "accounts": 2769, "storage": 10374, "contracts": 419,
-      "accountDepth": 8.32, "branchOccupancy": 4.08,
+      "accounts": 2769, "storage": 10374,
+      "accountDepth": 8.32,
       "label": "7.0x · measured exact 7× (2026-06-15) — 1.55 TB, 7.001× mainnet"
     },
     {
       "mult": 10.0, "status": "done", "measured": true, "block": 24759769,
       "totalGB": 2220.7, "acctGB": 606.2, "storGB": 1480.2, "codeGB": 134.3,
-      "accounts": 3944, "storage": 14177, "contracts": 24.3,
-      "accountDepth": 8.45, "branchOccupancy": 3.91,
+      "accounts": 3944, "storage": 14177,
+      "accountDepth": 8.45,
       "label": "10.0x · measured exact 10× (2026-06-24) — 2.22 TB, 10.03× mainnet"
     }
   ],

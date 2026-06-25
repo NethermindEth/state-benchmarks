@@ -6,7 +6,7 @@
     { "mult": 3.5,  "accountP50": 3822, "accountP95": 3942, "storageP50": 5091, "measured": true },
     { "mult": 5.0,  "accountP50": 4083, "accountP95": 4224, "storageP50": 5364, "measured": true },
     { "mult": 7.0,  "accountP50": 4159, "accountP95": 4289, "storageP50": 5429, "measured": true },
-    { "mult": 10.0, "accountP50": 4241, "accountP95": 4358, "storageP50": 5521, "measured": true }
+    { "mult": 10.0, "accountP50": 4241, "accountP95": 4358, "storageP50": 5486, "measured": true }
   ],
   "pendingMults": [],
   "storageLabel": "account + 1-slot storage proof, total bytes p50",

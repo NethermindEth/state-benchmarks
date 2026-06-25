@@ -1,6 +1,6 @@
 {
   "metric": "account-trie leaf count by depth level",
-  "source": "1× #5 geth inspect-trie (block 24,762,855); 3.5× PRISTINE scan (block 24,358,000); 5× #29 (block 24,546,596). Exact value-node counts per level.",
+  "source": "1× #5 geth inspect-trie (block 24,762,855); 3.5× PRISTINE scan (block 24,358,000); 5× #29 (block 24,546,596); 7× #35 (block 24,641,589); 10× #29 comment (block 24,759,769). Exact value-node counts per level.",
   "series": [
     { "key": "x1",  "label": "1× mainnet", "color": "#00b3ff" },
     { "key": "x35", "label": "3.5×",       "color": "#ff9900" },
