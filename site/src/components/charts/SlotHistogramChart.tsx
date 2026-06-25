@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import EChart from './EChart.tsx';
-import { base, catAxis, valAxis, LINE_TYPES, BRAND } from './echarts-base';
+import { base, catAxis, valAxis, LINE_TYPES, BRAND, markPointFrom, type MarkNote } from './echarts-base';
 
 type Bucket = { bucket: string } & Record<string, number>;
 interface Serie { key: string; label: string; color: string }
@@ -8,6 +8,7 @@ interface Props {
   buckets: Bucket[];
   series?: Serie[];
   pending?: string[];
+  notes?: MarkNote[];
 }
 
 const DEFAULT_SERIES: Serie[] = [
@@ -16,7 +17,7 @@ const DEFAULT_SERIES: Serie[] = [
   { key: 'x5', label: '5×', color: BRAND.green },
 ];
 
-export default function SlotHistogramChart({ buckets, series = DEFAULT_SERIES, pending = [] }: Props) {
+export default function SlotHistogramChart({ buckets, series = DEFAULT_SERIES, pending = [], notes = [] }: Props) {
   const option = useMemo(() => {
     const cats = buckets.map((b) => b.bucket);
     const lineSeries = series.map((s, i) => ({
@@ -30,6 +31,7 @@ export default function SlotHistogramChart({ buckets, series = DEFAULT_SERIES, p
       emphasis: { focus: 'series' as const },
       data: buckets.map((b) => b[s.key] ?? null),
     }));
+    if (notes.length) (lineSeries[0] as Record<string, unknown>).markPoint = markPointFrom(notes);
     const pendingSeries = pending.map((p) => ({
       name: `${p} pending`,
       type: 'line' as const,

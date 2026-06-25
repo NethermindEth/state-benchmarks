@@ -93,3 +93,48 @@ export function catAxis(name?: string, extra: Record<string, unknown> = {}) {
 export function valAxis(name?: string, extra: Record<string, unknown> = {}) {
   return { type: 'value', name, nameLocation: 'middle', nameGap: 44, ...axisCommon, ...extra };
 }
+
+// A labelled marker pinned to one or more data points — the chart's takeaway,
+// read straight off the curve instead of in a paragraph below it.
+export interface MarkNote {
+  coord: [number | string, number];
+  text: string;
+  color?: string;
+  position?: string; // label position relative to the point
+}
+export function markPointFrom(notes: MarkNote[]) {
+  return {
+    silent: true,
+    symbol: 'circle',
+    symbolSize: 9,
+    data: notes.map((n) => ({
+      coord: n.coord,
+      itemStyle: { color: n.color ?? BRAND.blue, borderColor: '#001a2c', borderWidth: 2 },
+      label: {
+        show: true,
+        position: n.position ?? 'top',
+        formatter: n.text,
+        align: 'center',
+        color: '#e6f1f8',
+        backgroundColor: 'rgba(0,26,44,0.92)',
+        borderColor: n.color ?? BRAND.blue,
+        borderWidth: 1,
+        borderRadius: 6,
+        padding: [5, 8],
+        fontSize: 11,
+        lineHeight: 15,
+      },
+    })),
+  };
+}
+
+// A dashed horizontal reference line (e.g. the mainnet baseline).
+export function markLineAt(y: number, text: string, color: string = BRAND.textDim) {
+  return {
+    silent: true,
+    symbol: 'none',
+    lineStyle: { color, type: 'dashed' as const, width: 1 },
+    label: { formatter: text, color: BRAND.textDim, fontSize: 10, position: 'insideEndTop' as const },
+    data: [{ yAxis: y }],
+  };
+}

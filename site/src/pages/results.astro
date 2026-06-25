@@ -4,19 +4,23 @@ import Section from '../components/Section.astro';
 import Card from '../components/ui/Card.astro';
 import Stat from '../components/ui/Stat.astro';
 import Placeholder from '../components/ui/Placeholder.astro';
-import Callout from '../components/ui/Callout.astro';
+import Detail from '../components/ui/Detail.astro';
 import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
 import CompositionChart from '../components/charts/CompositionChart.tsx';
 import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx';
 import ClientComparisonChart from '../components/charts/ClientComparisonChart.tsx';
 import TrieDepthChart from '../components/charts/TrieDepthChart.tsx';
 import SlotHistogramChart from '../components/charts/SlotHistogramChart.tsx';
+import ScalingContrast from '../components/charts/ScalingContrast.tsx';
+import ChartTakeaways from '../components/charts/ChartTakeaways.tsx';
+import SummaryStatsChart from '../components/charts/SummaryStatsChart.tsx';
 import growth from '../data/state-growth.json';
 import proofs from '../data/proof-sizes.json';
 import clients from '../data/client-comparison.json';
 import snap from '../data/snap-sync.json';
 import depth from '../data/trie-depth.json';
 import slots from '../data/slot-histogram.json';
+import stats from '../data/summary-stats.json';
 
 const m1 = growth.milestones.find((m) => m.mult === 1)!;
 const mx = growth.milestones.find((m) => m.mult === 10)!;
@@ -36,10 +40,23 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       <Stat measured value={`${share(mx.storGB, mx.totalGB)}/${share(mx.acctGB, mx.totalGB)}/${share(mx.codeGB, mx.totalGB)}`} label="storage / acct / code" sub="composition ≈ mainnet" />
     </div>
 
+    <div class="mt-12 rounded-2xl border border-ink-800 bg-ink-900/40 p-6">
+      <div class="flex items-baseline justify-between flex-wrap gap-x-4 gap-y-1 mb-1">
+        <h3 class="font-display text-2xl text-white">A 10× state is not a 10× cost</h3>
+        <span class="text-xs font-mono text-ink-500">auto-plays · or pick a milestone</span>
+      </div>
+      <p class="text-sm text-ink-400 mb-6 max-w-3xl">The headline in one picture: as the state climbs to 10×, the costs that actually matter — trie depth and witness size — stay almost flat.</p>
+      <ScalingContrast client:visible milestones={growth.milestones} proofs={proofs.series} />
+    </div>
+
     <div class="mt-12 grid grid-cols-1 gap-12">
       <Card title="Composition: correcting the inherited state">
-        <p class="text-sm text-ink-400 mb-4">The inherited 3.5× Bloatnet state was storage-skewed (87% storage vs mainnet's 67%). As we grew it to 5× we steered it back to mainnet's true split — so 1× and 5× match, and 3.5× visibly doesn't. Holding this ratio is what keeps milestones comparable.</p>
+        <p class="text-sm text-ink-400 mb-4">Steered back to mainnet's real byte split as we grew it — so every milestone is a fair comparison.</p>
         <CompositionChart client:visible data={growth.milestones} />
+        <ChartTakeaways client:visible items={[
+          { to: 87, suffix: '%', label: '3.5× storage share — skewed off-mainnet', color: '#ff9900', bar: 0.87 },
+          { to: 67, suffix: '%', label: '5× → 10× storage — back to mainnet', color: '#00b3ff', bar: 0.67 },
+        ]} />
       </Card>
 
       <Card title="Total state size">
@@ -47,38 +64,69 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Account-trie depth across milestones">
-        <p class="text-sm text-ink-400 mb-4">Where account leaves sit in the trie, per milestone. 1× and 3.5× nearly coincide (similar account counts); 5× / 7× / 10× shift progressively deeper (peak walks from depth 9 → 10) — depth tracks account count, the log₁₆ law. Across 1× → 10× the median moves under one full level.</p>
+        <p class="text-sm text-ink-400 mb-4">Where account leaves sit in the trie, per milestone.</p>
         <TrieDepthChart client:visible levels={depth.levels} series={depth.series} pending={depth.pending} />
-        <Callout type="math" title="Why depth barely moves — the log₁₆ law">
-          A 16-way trie has expected depth ≈ log₁₆(N). Mainnet → 5× deepens by <strong class="text-ink-100">+0.59 levels</strong> (7.61 → 8.20), and log₁₆(5.2×) = 0.59 — a textbook match; 5× → 10× adds only <strong class="text-ink-100">+0.25</strong> (= log₁₆(2×)). The account trie is provably <em>full</em> through depth 6 — exactly 16⁰…16⁶ branch nodes were counted — so leaves land at depth 8–9 and the whole 1× → 10× climb moves the median under one level. This one fact is why witnesses stay small (next chart) and why node counts scale linearly with leaf count, which let us predict the 7× / 10× counts before scanning them.
-        </Callout>
+        <ChartTakeaways client:visible items={[
+          { to: 0.84, fmt: 'dp2', prefix: '+', suffix: ' lvl', label: 'avg depth added · over a 10× state', color: '#ff9900' },
+          { text: '9 → 10', label: 'the leaf peak walks just one level, 1× → 10×', color: '#34d399' },
+          { text: 'log₁₆(N)', label: 'the depth law — confirmed at all 5 milestones', color: '#00b3ff' },
+        ]} />
+        <Detail summary="why depth barely moves — the log₁₆ law">
+          <p>A 16-way trie has expected depth ≈ log₁₆(N). Mainnet → 5× deepens by <strong class="text-ink-100">+0.59 levels</strong> (7.61 → 8.20), and log₁₆(5.2×) = 0.59 — a textbook match; 5× → 10× adds only <strong class="text-ink-100">+0.25</strong> (= log₁₆(2×)). The account trie is provably <em>full</em> through depth 6 — exactly 16⁰…16⁶ branch nodes were counted — so leaves land at depth 8–9 and the whole 1× → 10× climb moves the median under one level. This is why witnesses stay small and why node counts scale linearly with leaf count, which let us predict the 7× / 10× counts before scanning them.</p>
+        </Detail>
+      </Card>
+
+      <Card title="Account-trie depth vs account size">
+        <p class="text-sm text-ink-400 mb-4">The leaf-weighted average account-trie depth against the exact state size — toggle the x-axis between count and bytes.</p>
+        <SummaryStatsChart client:visible data={stats.accountDepth} />
       </Card>
 
       <Card title="Storage-trie depth across milestones">
-        <p class="text-sm text-ink-400 mb-4">The mirror image of account depth. Mainnet storage tries are shallow (most contracts hold 1–3 slots), but 3.5× → 10× pile up at depths 9–10 — the storage-spam mega-tries deepening each milestone (avg 7.24 → 7.81 from 5× to 10×).</p>
+        <p class="text-sm text-ink-400 mb-4">The mirror image of account depth: mainnet tries are shallow; bloat piles into depths 9–10.</p>
         <TrieDepthChart client:visible levels={depth.storageDepth.levels} series={depth.storageDepth.series} pending={depth.storageDepth.pending} />
-        <p class="mt-4 text-sm text-ink-400">{depth.storageDepth.note}</p>
+        <ChartTakeaways client:visible items={[
+          { to: 7.81, fmt: 'dp2', suffix: ' lvl', label: 'storage avg depth at 10× (5× was 7.24)', color: '#ff9900' },
+          { text: '9–10', label: 'the depths where storage-spam slots pile up', color: '#34d399' },
+        ]} />
+        <Detail summary="the detail">
+          <p>{depth.storageDepth.note}</p>
+        </Detail>
+      </Card>
+
+      <Card title="Storage-trie depth vs storage size">
+        <p class="text-sm text-ink-400 mb-4">Same, for the storage trie — toggle count ⇄ bytes. The leaf-weighted average jumps at the inherited 3.5× state (its storage-spam mega-tries are already deep), then keeps climbing.</p>
+        <SummaryStatsChart client:visible data={stats.storageDepth} />
       </Card>
 
       <Card title="Storage slots per contract — the long tail">
-        <p class="text-sm text-ink-400 mb-4">Contracts by how many storage slots they own (log scale), per milestone. ~87% own 1–3 slots; a ~4k tail owns 16k+ and dominates storage bytes. All milestones overlap — from 5× to 10× the slot growth landed entirely in those same mega-contracts (contractsWithStorage unchanged at 24.3M).</p>
-        <SlotHistogramChart client:visible buckets={slots.buckets} series={slots.series} pending={slots.pending} />
-        <p class="mt-4 text-sm text-ink-400">{slots.note}</p>
+        <p class="text-sm text-ink-400 mb-4">Contracts by how many slots they own (log scale). ~87% own 1–3; a tiny tail owns 16k+ and dominates.</p>
+        <SlotHistogramChart client:visible buckets={slots.buckets} series={slots.series} pending={slots.pending}
+          notes={[{ coord: ['16k+', 4097], text: '~4,097 contracts\nhold the 16k+ tail', color: '#f472b6' }]} />
+        <Detail summary="the detail">
+          <p>{slots.note}</p>
+        </Detail>
+      </Card>
+
+      <Card title="Slots per contract vs storage size">
+        <p class="text-sm text-ink-400 mb-4">How concentrated storage is: a randomly chosen <em>slot</em> lives in a mega-contract of millions of slots — the <em>slot-weighted</em> average — climbing with the exact storage size (toggle count ⇄ bytes). Note the log y-axis.</p>
+        <SummaryStatsChart client:visible data={stats.slotsPerContract} />
       </Card>
 
       <Card title="eth_getProof witness size">
-        <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set sampled in every state, so the bars are directly comparable. The dashed white line is the theoretical account-proof model <code>p(n) = c₀ + c₁·log₁₆(n)</code> — measured bars track it closely.</p>
+        <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set in every state — bars are directly comparable. Dashed line = the log₁₆ model.</p>
         <ProofComparisonChart
           client:visible
           data={proofs.series}
           pendingMults={proofs.pendingMults}
           theory={[{ mult: 1, y: 3820 }, { mult: 3.5, y: 3825 }, { mult: 5, y: 4083 }, { mult: 7, y: 4136 }, { mult: 10, y: 4192 }]}
+          notes={[{ coord: ['10×', 4241], text: '+11% vs mainnet\nmaxDepth 8→9', color: '#00b3ff' }]}
+          baseline={{ y: 3820, text: 'mainnet 3,820 B' }}
         />
-        <p class="mt-4 text-sm text-ink-400">Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why 3.5× (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher. {proofs.finding}</p>
-        <Callout type="note" title="What this means for statelessness">
-          A block's witness ≈ <strong class="text-ink-100">(state accesses) × (per-access witness)</strong>. The per-access term is log-bounded — a single proof grows only ~11% across a 10× state and account-proof maxDepth p50 holds at 8, ticking to 9 only at 10×. So the lever that moves a block's witness budget is the <em>number of accesses</em> (and gas repricing), not individual proof size. This is the pre-Verkle MPT baseline a binary tree (<a href="https://eips.ethereum.org/EIPS/eip-7864" target="_blank" rel="noreferrer noopener" class="text-accent-400 hover:text-accent-300">EIP-7864</a>) is measured against — track the 16-slot combined witness (~23–25 KB) as the per-access unit.
-          <span class="mt-3 block text-xs text-ink-500">Caveat: per-proof <code>nodeLookups</code> <em>drops</em> on the bloatnets (EOA p50 112 → 72) — a flat-DB residency artifact (freshly-written state is densely packed; mainnet is fragmented by years of compaction), not a real cost reduction. Witness <em>bytes</em> are client-agnostic — EIP-1186 proofs are byte-identical across clients for the same state root — and stay the comparable size metric.</span>
-        </Callout>
+        <Detail summary="what this means for statelessness">
+          <p>Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why 3.5× (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher. {proofs.finding}</p>
+          <p>A block's witness ≈ <strong class="text-ink-100">(state accesses) × (per-access witness)</strong>. The per-access term is log-bounded, so the lever that moves a block's witness budget is the <em>number of accesses</em> (and gas repricing), not individual proof size — the pre-Verkle MPT baseline a binary tree (<a href="https://eips.ethereum.org/EIPS/eip-7864" target="_blank" rel="noreferrer noopener" class="text-accent-400 hover:text-accent-300">EIP-7864</a>) is measured against.</p>
+          <p class="text-xs text-ink-500">Caveat: per-proof <code>nodeLookups</code> <em>drops</em> on the bloatnets (EOA p50 112 → 72) — a flat-DB residency artifact (freshly-written state is densely packed; mainnet is fragmented by years of compaction), not a real cost reduction. Witness <em>bytes</em> are client-agnostic — EIP-1186 proofs are byte-identical across clients for the same state root — and stay the comparable size metric.</p>
+        </Detail>
       </Card>
 
       <Card title="Snap sync — Nethermind vs Geth">
@@ -112,13 +160,17 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
           </table>
         </div>
 
-        <p class="mt-4 text-sm text-ink-400">{snap.finding}</p>
-        <p class="mt-3 text-sm text-ink-400">{snap.geth5x}</p>
-        <p class="mt-3 text-xs text-ink-500">{snap.caveat}</p>
-
-        <Callout type="note" title="Why a 10× state isn't a 10× sync">
-          Snap sync parallelizes <em>across</em> contracts, but a single contract's storage trie downloads as one <strong class="text-ink-100">sequential chain of range requests</strong>. The ~4,097 mega-contracts that absorb the bulk of the slots (the storage-spam tail) are the non-parallelizable serial fraction — Amdahl's law — so they stall the account frontier for hours (Geth) and form the long final phase (NM). The clients just schedule that work oppositely: NM drains the mega-tries last as a clean phase; Geth front-loads them and goes stop-go. And in the 5× run the box sat <strong class="text-ink-100">~80% idle</strong> — the ceiling is single-peer request concurrency, not CPU or disk, so the highest-leverage fix is more serving peers, not faster hardware.
-        </Callout>
+        <ChartTakeaways client:visible items={[
+          { text: '✓ 1×–5×', label: 'every run reconstructs the root bit-for-bit', color: '#34d399' },
+          { to: 64, prefix: '−', suffix: '%', label: 'Geth peak RSS vs Nethermind · 3.5×', color: '#00b3ff', bar: 0.64 },
+          { to: 80, prefix: '~', suffix: '%', label: 'box idle at 5× — single-peer bound, not HW', color: '#ff9900', bar: 0.80 },
+        ]} />
+        <Detail summary="why a 10× state isn't a 10× sync">
+          <p>{snap.finding}</p>
+          <p>{snap.geth5x}</p>
+          <p>Snap sync parallelizes <em>across</em> contracts, but a single contract's storage trie downloads as one <strong class="text-ink-100">sequential chain of range requests</strong>. The ~4,097 mega-contracts that absorb the bulk of the slots are the non-parallelizable serial fraction — Amdahl's law — so they stall the account frontier for hours (Geth) and form the long final phase (NM). And in the 5× run the box sat <strong class="text-ink-100">~80% idle</strong> — the ceiling is single-peer request concurrency, so the highest-leverage fix is more serving peers, not faster hardware.</p>
+          <p class="text-xs text-ink-500">{snap.caveat}</p>
+        </Detail>
 
         <div class="mt-6 rounded-xl border border-signal-good/30 bg-signal-good/5 p-4 text-sm text-ink-200">
           <span class="font-mono text-signal-good text-xs uppercase tracking-wider">verified</span>
@@ -169,6 +221,8 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         </tbody>
       </table>
     </div>
-    <p class="mt-4 text-sm text-ink-400">{growth.note}</p>
+    <Detail summary="sources & notes">
+      <p>{growth.note}</p>
+    </Detail>
   </Section>
 </BaseLayout>

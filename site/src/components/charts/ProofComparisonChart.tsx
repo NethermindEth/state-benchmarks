@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import EChart from './EChart.tsx';
-import { base, catAxis, valAxis, BRAND } from './echarts-base';
+import { base, catAxis, valAxis, BRAND, markPointFrom, markLineAt, type MarkNote } from './echarts-base';
 
 interface Row { mult: number; accountP50: number; accountP95: number; storageP50: number; measured?: boolean }
-interface Props { data: Row[]; pendingMults?: number[]; theory?: { mult: number; y: number }[] }
+interface Props { data: Row[]; pendingMults?: number[]; theory?: { mult: number; y: number }[]; notes?: MarkNote[]; baseline?: { y: number; text: string } }
 
 const BARS = [
   { key: 'accountP50', label: 'account p50', color: BRAND.blue },
@@ -11,7 +11,7 @@ const BARS = [
   { key: 'storageP50', label: 'account + 1 slot p50', color: BRAND.orange },
 ] as const;
 
-export default function ProofComparisonChart({ data, pendingMults = [], theory = [] }: Props) {
+export default function ProofComparisonChart({ data, pendingMults = [], theory = [], notes = [], baseline }: Props) {
   const option = useMemo(() => {
     const mults = [...data.map((d) => d.mult), ...pendingMults].sort((a, b) => a - b);
     const cats = mults.map((m) => `${m}×`);
@@ -26,6 +26,9 @@ export default function ProofComparisonChart({ data, pendingMults = [], theory =
       emphasis: { focus: 'series' as const },
       data: mults.map((m) => (byMult.get(m) as Row | undefined)?.[b.key] ?? null),
     }));
+
+    if (notes.length) (barSeries[0] as Record<string, unknown>).markPoint = markPointFrom(notes);
+    if (baseline) (barSeries[0] as Record<string, unknown>).markLine = markLineAt(baseline.y, baseline.text);
 
     const theorySeries = theory.length
       ? [{
