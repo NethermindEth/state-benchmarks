@@ -74,7 +74,7 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Snap sync — Nethermind vs Geth">
-        <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). Clean wall-times through 5× (NM→NM); the 5× NM→Geth rate analysis is summarised below. 7× / 10× snap-sync pending.</p>
+        <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). Measured through 5× on both NM→NM and NM→Geth; 7× / 10× snap-sync pending.</p>
         <ClientComparisonChart client:visible data={snap.wallTime} clients={snap.clients} unit="h" pendingMults={snap.pendingMults} />
 
         <div class="overflow-x-auto mt-6 rounded-xl border border-ink-800">

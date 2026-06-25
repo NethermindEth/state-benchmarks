@@ -4,7 +4,7 @@
   "wallTime": [
     { "mult": 1,   "nethermind": 0.86, "geth": 2.83 },
     { "mult": 3.5, "nethermind": 12.38, "geth": 16.30 },
-    { "mult": 5,   "nethermind": 17.22 }
+    { "mult": 5,   "nethermind": 17.22, "geth": 57 }
   ],
   "pendingMults": [7, 10],
   "rows": [
@@ -12,10 +12,11 @@
     { "mult": "1×",   "pair": "NM → Geth", "wall": "2 h 50 m", "rss": "4.8 GB",  "db": "307 GB", "bitIdentical": true },
     { "mult": "3.5×", "pair": "NM → NM",   "wall": "12 h 23 m", "rss": "18.4 GB", "db": "1.2 TB", "bitIdentical": true },
     { "mult": "3.5×", "pair": "NM → Geth", "wall": "16 h 18 m", "rss": "6.7 GB",  "db": "1.2 TB", "bitIdentical": true },
-    { "mult": "5×",   "pair": "NM → NM",   "wall": "17 h 13 m", "rss": "26 GB",   "db": "1.6 TB", "bitIdentical": true }
+    { "mult": "5×",   "pair": "NM → NM",   "wall": "17 h 13 m", "rss": "26 GB",   "db": "1.6 TB", "bitIdentical": true },
+    { "mult": "5×",   "pair": "NM → Geth", "wall": "~57 h",     "rss": "n/s",     "db": "n/s",    "bitIdentical": true }
   ],
   "finding": "At 1× Geth is ~3.3× slower from a single NM peer. At 3.5× the trade-off flips two ways: NM finishes ~4 h sooner (it drains the storage-spam mega-tries as a clean final phase, while Geth front-loads them and stalls stop-go on each one), but Geth is far leaner on memory (~6.7 GB peak vs NM's ~18.4 GB). 5× NM → NM completes in ~17 h over the cross-VM link, ~1.6 TB on disk and ~26 GB RSS — same shape, the storage-spam mega-tries dominating the tail. Every run reconstructs the source state root bit-for-bit.",
-  "geth5x": "5× NM → Geth (loopback, single peer) settles at a steady 2.38M slots/min, giving a 'normal' full-sync estimate of ~57 h (~2.4 days) for the 7.79B slots — bound by single-peer request concurrency, not hardware (the box sat ~80% idle). Stock Nethermind couldn't even serve the x5 chain over devp2p until nethermind#12059: 8-billion-gas blocks make 26–47 MB bodies that overflow the 16 MB devp2p limit and desync the RLPx framer; the fix added an accurate size estimator + a 15 MB outgoing-bodies cap (0 framing errors across the ~2-day sync).",
-  "caveat": "Wall time and bandwidth are single-dedicated-peer, controlled-LAN figures — read as relative scaling across state sizes, not real-world multi-peer sync time. DB size and peak RSS are topology-independent. Source states are frozen; NM uses the additive Sync.StaticSnapPivot flag (nethermind#11943), Geth a minimal fake-CL forkchoice. The 5× NM → Geth wall-time is a steady-state estimate (snapshot-gen still finishing); 7× / 10× snap-sync pending (issues #17 / #18).",
+  "geth5x": "5× NM → Geth (loopback, single peer) completed bit-identical in ~57 h at a steady 2.38M slots/min across the 7.79B slots — bound by single-peer request concurrency, not hardware (the box sat ~80% idle; both clients <1 core). Stock Nethermind couldn't even serve the x5 chain over devp2p until nethermind#12059: 8-billion-gas blocks make 26–47 MB bodies that overflow the 16 MB devp2p limit and desync the RLPx framer; the fix added an accurate size estimator + a 15 MB outgoing-bodies cap (0 framing errors across the whole run). Geth is ~3.3× slower than the NM target from a single peer — its per-peer in-flight request cap is the ceiling.",
+  "caveat": "Wall time and bandwidth are single-dedicated-peer, controlled figures — read as relative scaling across state sizes, not real-world multi-peer sync time. Setups vary (the 5× NM→NM ran cross-VM, the 5× NM→Geth on loopback), so compare within a pair, not across. \"n/s\" = not sampled this run (final DB size + peak RSS weren't captured for 5× NM→Geth). Source states are frozen; NM uses the additive Sync.StaticSnapPivot flag (nethermind#11943), Geth a minimal fake-CL forkchoice. 7× / 10× snap-sync pending (issues #17 / #18).",
   "source": "state-benchmarks #21 / #16 — NM 24,954,458 (x1), perf-devnet-3 24,358,003 (3.5×), 5× rebloat 24,546,596."
 }
