@@ -51,8 +51,8 @@ plugin). It worked at mainnet size and held up through ~3.5×, but broke at 5×.
   already computes them; writing them is nearly free). All the memory-hungry tracking —
   bootstrap scan, dedup, slot-count accounting, snapshotting — moves to a **sidecar process**
   that reads the same RocksDB in secondary mode. The sidecar picks its own memory budget and can
-  be killed and restarted without touching the chain. About **5,700 LOC of in-engine tracker
-  code was deleted.**
+  be killed and restarted without touching the chain. About **7,500 lines of in-engine tracker code
+  were deleted** (a net −4,900 once the diff-only plugin is counted back).
 </Callout>
 
 This shape has driven a live 5× bloating run for 16+ hours: ~858 GB state, sensor tracking chain

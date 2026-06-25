@@ -37,8 +37,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
         <p class="mt-6 text-lg md:text-xl text-ink-300 max-w-2xl">
           Mainnet is 381M accounts, 1.56B storage slots, 221 GB of trie. We pick up an existing
           ~3.5× Bloatnet and a Go controller drives it all the way to <span class="text-white font-medium">10× (2.22 TB)</span>
-          — benchmarking proof sizes, block execution, and snap sync across five EL
-          clients to turn the gas-limit debate into a data problem.
+          — benchmarking proof sizes, trie structure, and snap sync (Nethermind and Geth so far;
+          the full five-client battery and block execution next) to turn the gas-limit debate into a data problem.
         </p>
         <div class="mt-8 flex flex-wrap gap-3">
           <a href={`${base}/design/overview`} class="rounded-lg bg-accent-500 hover:bg-accent-400 text-ink-950 font-medium px-5 py-3 transition-colors">

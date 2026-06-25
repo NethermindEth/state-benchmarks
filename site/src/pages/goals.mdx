@@ -16,9 +16,10 @@ Mainnet sampled proof sizes at the same head: **account proof p50 = 3,821 B / p9
 
 ## Track 1 — Scale
 
-The Glamsterdam fork (H1 2026) carries a gas-limit increase. The community is converging on
-**100M+ gas per block** but the supporting evidence is patchy: most published benchmarks
-stop at mainnet size, where the trie is still warm in OS page cache.
+The Glamsterdam fork (H1 2026) ships the state-access repricings and block-level access lists that
+make a higher gas limit safe to vote in (the limit itself is validator-voted, not set by the fork).
+The community is converging on **100M+ gas per block** but the supporting evidence is patchy: most
+published benchmarks stop at mainnet size, where the trie is still warm in OS page cache.
 
 <Callout type="goal" title="Deliverable 1.A">
   The full benchmark battery — sync, execution-under-head, and JSON-RPC latency — run on
@@ -87,11 +88,11 @@ maps onto a protocol decision being made now rather than a hypothetical.
 - **The gas↔real-cost curve.** Cold `SLOAD` is priced flat (2,100 gas) regardless of state size,
   while its real latency steps off a cliff once the working set leaves RAM — the same IO knee the
   [Problems](/problems) page describes, expressed as a *real-cost-per-gas* slope. That slope is the
-  empirical input the state-repricing EIPs ([EIP-8037](https://eips.ethereum.org/EIPS/eip-8037) /
-  [EIP-8038](https://eips.ethereum.org/EIPS/eip-8038)) need — their gas constants are currently *TBD*.
+  empirical input behind the state-access repricing in [EIP-8038](https://eips.ethereum.org/EIPS/eip-8038)
+  (with state-creation costs in [EIP-8037](https://eips.ethereum.org/EIPS/eip-8037)) — whose gas constants are still being tuned.
 - **The BAL parallelism ceiling ([EIP-7928](https://eips.ethereum.org/EIPS/eip-7928)).** Block-level
-  access lists are the lever meant to take gas toward 200M via parallel state pre-fetch and parallel
-  root computation. Parallelism only helps while the bottleneck is compute; at 5–10× state it shifts
+  access lists are the lever meant to push gas past 100M — and, longer-term, toward 200M — via parallel
+  state pre-fetch and parallel root computation. Parallelism only helps while the bottleneck is compute; at 5–10× state it shifts
   to random-read IOPS. Whether the speedup survives that shift is unmeasured.
 - **DB-architecture attribution.** The cross-client battery (Track 1) shows *that* clients diverge;
   isolating *why* — RocksDB LSM read-amplification vs Pebble/PBSS path-keying vs MDBX B-tree freelist

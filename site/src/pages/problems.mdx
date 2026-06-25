@@ -81,7 +81,7 @@ H \approx 1 - \left(1 - \frac{|\text{cache}|}{|\text{live nodes}|}\right)^{k}
 $$
 
 for $k$ trie hops per block. Instrumented Nethermind reports **account-proof cache hit
-rate of ~100 %** and **storage-proof cache hit rate of 94.6 % mean / 99.1 % p95** on
+rate of ~100 %** and **storage-proof cache hit rate of 94.9 % mean / 99.1 % p95** on
 mainnet (sample at head 24,954,458). That headroom is what disappears first as state
 grows — and the moment hits drop below ~90 %, a single miss is a ~200 µs disk seek
 inside the EVM hot loop.
