@@ -1,0 +1,146 @@
+# Benchmark config for the geth bloatnet template.
+#
+# Differences from the repo-root config_geth.yml:
+#   - infrastructure.manage: false       (start_infra.sh owns the lifecycle)
+#   - prometheus_url is the fallback only. The aggregator prefers the
+#     PROMETHEUS_PORT (or PROMETHEUS_URL) env var that .env.geth already sets,
+#     so this stays in sync with the scripts. On hosts where an unrelated
+#     Prometheus owns :9090, the benchmark stack is mapped elsewhere (the
+#     reference host uses :9092); pointing the aggregator at :9090 there hits
+#     the wrong server and silently drops every cAdvisor metric.
+#   - disk_iops_peak / disk_throughput_peak wrapped in sum() so the aggregator
+#     records the device-aggregate peak, not an arbitrary per-device series
+
+infrastructure:
+  manage: false
+  ssh_command: ""
+  # Unused when manage=false but kept for reference / `--phase sync` reruns.
+  compose_paths:
+    monitoring: "templates/geth/docker-compose.monitoring.yml"
+    clients: "templates/geth/docker-compose.geth-bloatnet.yml"
+
+nodes:
+  rpc_url: "http://localhost:8547"
+  consensus: false
+  # The orchestrator's built-in mock-CL auto-start is pivot-only (snap-sync
+  # from empty). The bloatnet snapshot is already at head, so we want REPLAY,
+  # not pivot — and run_benchmark.sh launches it directly alongside locust.
+  # Keeping consensus_mode: none stops the runner from trying anything.
+  consensus_mode: "none"
+  rpc_startup_timeout_sec: 300
+  sync_head_freshness_sec: 120
+  clients:
+    - "geth"
+  data_dirs:
+    nethermind: "/nethermind/data/nethermind_db/mainnet"
+    geth: "/data"
+    besu: "/opt/besu/data"
+    reth: "/root/.local/share/reth"
+    erigon: "/home/erigon/.local/share/erigon"
+
+metrics:
+  # Fallback only — PROMETHEUS_PORT/PROMETHEUS_URL from .env.geth take precedence.
+  prometheus_url: "http://localhost:9092"
+  sync_window: "1h"
+  load_window: "5m"
+
+  # Cross-client container/host queries. {client} -> "benchmark_<client>",
+  # {window} -> sync_window or load_window depending on phase.
+  queries:
+    cpu_percent_peak: 'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    cpu_percent_sustained: 'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    rss_peak_bytes: 'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes: 'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec: 'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak: 'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    net_rx_bytes_per_sec_avg: 'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    # sum() across devices: container_fs_* returns one series per backing
+    # block device. Without the sum() the aggregator's result[0] is whichever
+    # device Prometheus happens to return first (usually the idle one).
+    disk_iops_peak: 'max_over_time(sum(rate(container_fs_reads_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time(sum(rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+
+  client_queries:
+    nethermind:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(nethermind_blocks_gas_used[{window}])"
+    geth:
+      # Geth emits go-metrics summaries, not histograms — chain_execution{quantile=…}.
+      block_proc_p50: 'chain_execution{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_execution{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_execution{quantile="0.99"} / 1e9'
+      gas_per_sec: "rate(chain_head_gas_used[{window}])"
+    besu:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(besu_blockchain_chain_head_gas_used[{window}])"
+    reth:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6"
+    erigon:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(chain_head_gas_used[{window}])"
+
+  regression_threshold: 0.25
+
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+    - "disk_throughput_peak_bytes_per_sec"
+    - "disk_iops_peak"
+    - "net_rx_bytes_per_sec_peak"
+    - "net_rx_bytes_per_sec_avg"
+
+load_test:
+  run_time: "5m"
+  users: 50
+  spawn_rate: 10
+  wait_time:
+    min: 0.1
+    max: 0.5
+  gas_tests_enabled: false
+  task_weights:
+    eth_getBalance: 3
+    eth_getStorageAt: 3
+    eth_call: 2
+    eth_getCode: 2
+    eth_getProof: 1
+    eth_sendTransaction: 1
+  latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+  recent_block_window: 1000
+  min_pinned_window: 8
+  block_window_refresh_sec: 30
+  addresses:
+    - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  slots:
+    - "0x0"
+    - "0x1"
+    - "0x2"
+  eth_call_shapes:
+    - "0x18160ddd" # totalSupply()
+    - "0x313ce567" # decimals()
+    - "0x95d89b41" # symbol()
+    - "0x06fdde03" # name()
+
+# Mock-CL replay (advances head under locust load). Read by run_benchmark.sh,
+# NOT by the orchestrator: with infrastructure.manage: false the runner skips
+# the start_infrastructure() path that consumes this section in the repo-root
+# config. Kept here as documentation of the values run_benchmark.sh expects.
+# Override any of these via env vars in .env.geth (MOCK_CL_PAYLOADS,
+# MOCK_CL_JWT, MOCK_CL_ENGINE_URL, MOCK_CL_LATENCY_CSV).
+mock_cl:
+  # Default: templates/geth/payloads/<milestone>.jsonl. Drop a CL-recorded
+  # JSONL there; without it run_benchmark.sh skips replay and warns.
+  payloads: ""
+  # JWT secret. .env.geth's GETH_DB_PATH/jwt.hex (the same file mounted into
+  # the geth container at /data/jwt.hex) is the default.
+  jwt: ""
+  engine_url: "http://localhost:8551"

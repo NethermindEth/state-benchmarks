@@ -1,0 +1,81 @@
+# Nethermind bloatnet node backed by a pre-synced x3.5 snapshot on the host's disk.
+#
+# Self-contained template — start_infra.sh (in this directory) brings this up
+# together with docker-compose.monitoring.yml and points it at
+# templates/neth/.env.neth. config_neth.yml in this directory has
+# infrastructure.manage: false so the orchestrator does NOT touch docker —
+# this script-managed stack is the canonical lifecycle.
+#
+# Conventions kept so the rest of the pipeline works unchanged:
+#   - service name "nethermind"        -> Prometheus scrape target nethermind:6060
+#   - container benchmark_nethermind   -> cAdvisor queries + runner's du-based DB sizing
+#   - shared benchmark_net network     -> monitoring stack can reach the node
+#
+# Bloatnet specifics (this is a mainnet SHADOWFORK, not vanilla mainnet):
+#   - chainId stays 1 (shadowfork), but the p2p network id is 12159, set via
+#     --Init.NetworkId. The fork schedule comes from the mounted chainspec.
+#   - The image MUST match the one that produced the snapshot's FlatDb state
+#     (nethermindeth/nethermind:deep-states-turn) or the DB won't open.
+#
+# P2P is fully disabled: the snapshot is the canonical state and the benchmark
+# advances head via the mock-CL engine-API replay, not from network peers.
+#
+# Host paths default to the x3.5 snapshot layout; override the NETHERMIND_*
+# variables in templates/neth/.env.neth if the host layout differs. Host ports
+# avoid geth-x35-target (host-net 8545/8551): RPC 8547, engine 8552, metrics 6060.
+
+name: benchmark-clients
+
+networks:
+  default:
+    name: benchmark_net
+
+services:
+  nethermind:
+    image: ${NETHERMIND_IMAGE:-nethermindeth/nethermind:deep-states-turn}
+    container_name: benchmark_nethermind
+    tty: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+    volumes:
+      - ${NETHERMIND_DB_PATH:-/mnt/bigdata/neth-x35-24358000/mainnet}:/nethermind/data/nethermind_db/mainnet
+      - ${NETHERMIND_CHAINSPEC_PATH:-/mnt/bigdata/cl-config/chainspec.json}:/chainspec.json:ro
+      - ${NETHERMIND_JWT_PATH:-./docker/jwtsecret}:/jwt:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8547}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8552}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${NETHERMIND_METRICS_PORT:-6060}:6060" # Metrics
+    command:
+      - --config=mainnet
+      - --datadir=/nethermind/data
+      # Bloatnet shadowfork: fork rules come from the mounted chainspec; the p2p
+      # network id (12159) is distinct from the chainId (1).
+      - --Init.ChainSpecPath=/chainspec.json
+      - --Init.NetworkId=12159
+      # FlatDb state layout the snapshot was written with — must match the image.
+      - --FlatDb.Enabled=true
+      - --FlatDb.MaxReorgDepth=192
+      - --Pruning.Mode=None
+      - --JsonRpc.Enabled=true
+      - --JsonRpc.Host=0.0.0.0
+      - --JsonRpc.Port=8545
+      - --JsonRpc.EnabledModules=[Eth,Net,Web3,Admin,Debug]
+      - --JsonRpc.EngineHost=0.0.0.0
+      - --JsonRpc.EnginePort=8551
+      - --JsonRpc.JwtSecretFile=/jwt
+      # 1B-gas bloat blocks can exceed the 30MB default request body limit.
+      - --JsonRpc.MaxRequestBodySize=300000000
+      # P2P fully disabled — the snapshot is the canonical state and the
+      # benchmark advances head via the mock-CL replay, not from peers.
+      - --Sync.SnapSync=false
+      - --Network.MaxActivePeers=0
+      - --Network.OnlyStaticPeers=true
+      - --Init.DiscoveryEnabled=false
+      - --Blocks.TargetBlockGasLimit=1000000000
+      - --TxPool.Size=10000
+      - --Metrics.Enabled=true
+      - --Metrics.ExposePort=6060
+      - --log=${NETHERMIND_LOG_LEVEL:-INFO}

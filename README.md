@@ -5,7 +5,7 @@ A configuration-driven harness for benchmarking Ethereum execution clients (Neth
 ## Architecture Overview
 
 *   **Orchestrator (`src/orchestrator/runner.py`)**: Manages docker-compose lifecycle (auto-detects v1 vs v2 plugin), measures sync wall time (requires `eth_syncing` to be false *and* a fresh chain head over several consecutive polls — clients report "not syncing" before sync starts, so a bare `eth_syncing` poll lies), snapshots sync-phase Prometheus metrics right after sync, measures on-disk DB size, then triggers the load test and aggregator. A failing client doesn't abort the rest of the client list. Leaves the stack running after the benchmark by default; pass `--stop-monitoring` to tear it down.
-*   **Load Generator (`src/load_tests/locustfile.py`)**: `FastHttpUser` workload covering `eth_getBalance`, `eth_getStorageAt`, `eth_call` (multiple shapes), `eth_getCode`, `eth_getProof`. Samples random recent blocks (configurable window) to avoid hitting the same tip block on every call. Captures `eth_getProof` response sizes to a per-run CSV. Exposes a Prometheus `/metrics` endpoint on port 9646 (requests, latency histograms, active users, failures) that Prometheus scrapes live while the load test runs.
+*   **Load Generator (`src/load_tests/locustfile.py`)**: `FastHttpUser` workload covering `eth_getBalance`, `eth_getStorageAt`, `eth_call` (multiple shapes), `eth_getCode`, `eth_getProof`, plus an optional gas-paying `eth_sendTransaction` task (off by default; see `load_test.gas_tests_enabled`). Samples random recent blocks (configurable window) to avoid hitting the same tip block on every call. Captures `eth_getProof` response sizes to a per-run CSV. Exposes a Prometheus `/metrics` endpoint on port 9646 (requests, latency histograms, active users, failures) that Prometheus scrapes live while the load test runs.
 *   **Metrics Aggregator (`src/metrics/aggregator.py`)**: Queries Prometheus for peak / sustained CPU, RSS, RSS growth, network RX, disk IOPS, disk throughput, plus per-client block-processing p50/p95/p99 and gas/s. Parses Locust stats and proof-size CSV. Emits JSON + flat CSV per client. Compares against the most recent prior milestone for the same client, with a per-metric direction map (higher-is-better metrics flip the regression check).
 *   **Monitoring Stack (`docker/`)**: Prometheus + cAdvisor + node_exporter + Grafana. Grafana is anonymous-viewer enabled at `http://localhost:3000` and auto-loads the `Benchmark` dashboard (Resources / Client / Host / Locust rows) — no login or manual import.
 
@@ -78,6 +78,7 @@ load_test:
   run_time: "5m"
   users: 50
   spawn_rate: 10
+  gas_tests_enabled: false    # gas-paying tasks (eth_sendTransaction); see below
   recent_block_window: 1000   # how many recent blocks to sample from
   addresses: [...]
   slots: [...]
@@ -86,6 +87,8 @@ load_test:
     - "0x313ce567"  # decimals()
     # ...
 ```
+
+**Gas-paying tasks (`load_test.gas_tests_enabled`):** tasks marked with the Locust `gas` tag (currently `eth_sendTransaction`, a 1-wei value transfer to a random configured address) **spend real gas** and require an unlocked account on the node — the locustfile takes the first `eth_accounts` entry at test start and logs a warning (tasks no-op) if there is none. Disabled by default; only `test-config.yml` enables it, since the Geth `--dev` stack has free gas and an unlocked dev account. Never enable it against mainnet or a node you don't own. When the flag is off the tagged tasks are excluded from the task set entirely; when it's on you can still drop them for a single manual run with Locust's native `--exclude-tags gas`.
 
 **Note:** Per-client `client_queries` metric names should be verified against each client's `/metrics` endpoint — they differ across clients and versions. Missing metrics return `0.0` (logged, not fatal) so the harness keeps running.
 
@@ -281,6 +284,19 @@ PYTHONPATH=src uv run python -m mock_cl --jwt /path/to/jwt.hex \
 
 > **Cancun+ recording limitation**: `eth_getBlockByNumber` cannot return blob versioned-hashes or `parentBeaconBlockRoot`, which `engine_newPayloadV3/V4` require. `record` logs a warning and omits them; for Cancun+ replay you need a CL-recorded payload source. Pre-Cancun (V1/V2) replay works from `record` output directly.
 
+### RLP payload stream → JSONL (`scripts/rlp_to_mocks.py`)
+
+The replay driver reads **JSONL** (one `{"payload": {...}, ...}` per line). Payload generators that emit a binary stream of length-prefixed RLP `ExecutionPayload` records (4-byte big-endian length + RLP body each) are converted with the stdlib-only converter — no `rlp` dependency:
+
+```bash
+uv run python scripts/rlp_to_mocks.py payloads_x3.5.bin -o payloads_x3.5.jsonl \
+  --newpayload-version 4 \
+  --parent-beacon-block-root 0x0000000000000000000000000000000000000000000000000000000000000000 \
+  --versioned-hashes "" --execution-requests ""
+```
+
+It maps the 17 ExecutionPayloadV3 fields to the engine-API schema (respecting QUANTITY vs DATA hex encoding) and stamps the engine extras an `ExecutionPayload` doesn't carry. For **Prague** bloat blocks these are constant — zero (not `null`) `parent_beacon_block_root`, empty `versioned_hashes`/`execution_requests` — and the version is forced to **V4** (auto-pick lands on V3 because there are no blob/execution-request signals). All are CLI-overridable. Defensively, `load_payloads` also stamps a missing/`null` `parent_beacon_block_root` with the zero hash so `engine_newPayloadV3/V4` won't reject it, and `replay --newpayload-version N` overrides the per-record version for the whole run.
+
 ### Config + orchestrator integration
 
 Set the consensus driver in `config.yml` under `nodes:` and configure the driver under the top-level `mock_cl:` section:
@@ -309,6 +325,25 @@ Back-compat: if `consensus_mode` is unset, the legacy boolean is used (`consensu
 ### Nethermind native alternative
 
 For **Nethermind** targets, `--Sync.StaticSnapPivot` ([nethermind#11943](https://github.com/NethermindEth/nethermind/pull/11943)) is the client-native equivalent of pivot mode: Nethermind pins the snap-sync pivot internally without an external FCU loop. In that case set `consensus_mode: none` and pass the flag to Nethermind instead.
+
+## Per-client snapshot templates (`templates/`)
+
+Each `templates/<client>/` is a **self-contained, script-managed stack** for benchmarking a client against a pre-synced snapshot on the host disk — `config_<client>.yml` sets `infrastructure.manage: false` so the orchestrator never touches docker; the scripts own the lifecycle. Copy a directory wholesale to add a client: drop in the client compose, `config_<client>.yml`, and `.env.<client>`; the scripts derive the client name from the directory.
+
+```bash
+./templates/<client>/start_infra.sh           # up: monitoring + the client (idempotent)
+./templates/<client>/run_benchmark.sh <ms>     # runner --skip-sync (+ background mock-CL replay)
+./templates/<client>/start_infra.sh down [-v]  # tear down (-v wipes volumes)
+```
+
+`run_benchmark.sh` launches the mock-CL **replay** in the background (advancing the head under load) whenever `MOCK_CL_PAYLOADS` resolves to a file; replay is skipped (with a warning) otherwise.
+
+* **`templates/geth/`** — geth bloatnet snapshot (snap-synced; no `--syncmode`/`--gcmode` pinning).
+* **`templates/neth/`** — Nethermind on the x3.5 bloatnet snapshot (mainnet shadowfork: chainId 1, p2p `--Init.NetworkId=12159`, FlatDb). The image **must** match the one that wrote the snapshot's FlatDb state, and the chainspec is mounted from the host. Ports avoid a co-located host-net geth (RPC 8547 / engine 8552 / metrics 6060). Run `runner.py` with `--client nethermind` (the framework key; the dir is `neth` only for the path).
+
+> **cAdvisor on the containerd image store**: where Docker uses the containerd snapshotter (`Storage Driver: overlayfs`), stock cAdvisor (≤ v0.52) emits no `name="benchmark_*"` series, so the Grafana **Client** variable is empty and every per-container CPU/RSS/disk/net query returns nothing. Build the patched image once (`docker build -t cadvisor-layerdb-fix:v0.49.1 docker/cadvisor`) and set `CADVISOR_IMAGE=cadvisor-layerdb-fix:v0.49.1` in `.env.<client>` — no dockerd restart needed.
+
+> **Load-testing a replay-driven node**: a load test that pins *recent* blocks will hit `-32002 No state available` if the node keeps only a shallow window of state (e.g. FlatDb) and the replay advances the head faster than `load_test.block_window_refresh_sec`. Set `load_test.min_pinned_window` above the node's servable band to fall back to `latest`, and/or bound the replay with `--count`.
 
 ## Testing
 
