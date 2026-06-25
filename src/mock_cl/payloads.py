@@ -14,6 +14,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# Cancun+ ``engine_newPayloadV3/V4`` reject a NULL parentBeaconBlockRoot. Frozen
+# bloat snapshots have no real beacon root, so records that omit it are stamped
+# with this zero hash (zero, not null) — see :func:`load_payloads`.
+ZERO_BEACON_ROOT = "0x" + "00" * 32
+
 
 @dataclass
 class PayloadRecord:
@@ -25,6 +30,8 @@ class PayloadRecord:
     versioned_hashes: Optional[List[str]]
     parent_beacon_block_root: Optional[str]
     fork: Optional[str]
+    execution_requests: Optional[List[Any]] = None
+    newpayload_version: Optional[int] = None
 
 
 def _block_number(payload: Dict[str, Any]) -> int:
@@ -40,7 +47,9 @@ def load_payloads(path: str) -> Iterator[PayloadRecord]:
     """Yield :class:`PayloadRecord`s from a JSONL file.
 
     Each line is a JSON object with a required ``payload`` (ExecutionPayload) and
-    optional ``versioned_hashes``, ``parent_beacon_block_root`` and ``fork``.
+    optional ``versioned_hashes``, ``parent_beacon_block_root``, ``execution_requests``,
+    ``newpayload_version`` and ``fork``. A missing/null ``parent_beacon_block_root`` is
+    stamped with :data:`ZERO_BEACON_ROOT` so Cancun+ newPayload won't reject it.
     """
     with open(path) as f:
         for line_no, line in enumerate(f, start=1):
@@ -54,13 +63,18 @@ def load_payloads(path: str) -> Iterator[PayloadRecord]:
             payload = obj.get("payload")
             if not isinstance(payload, dict):
                 raise ValueError(f"{path}:{line_no}: missing or non-object 'payload'")
+            beacon_root = obj.get("parent_beacon_block_root")
+            if beacon_root is None:
+                beacon_root = ZERO_BEACON_ROOT
             yield PayloadRecord(
                 payload=payload,
                 block_hash=payload.get("blockHash"),
                 block_number=_block_number(payload),
                 versioned_hashes=obj.get("versioned_hashes"),
-                parent_beacon_block_root=obj.get("parent_beacon_block_root"),
+                parent_beacon_block_root=beacon_root,
                 fork=obj.get("fork"),
+                execution_requests=obj.get("execution_requests"),
+                newpayload_version=obj.get("newpayload_version"),
             )
 
 

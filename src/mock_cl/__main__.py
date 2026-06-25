@@ -47,6 +47,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_replay.add_argument("--count", type=int, default=None, help="Replay at most this many blocks")
     p_replay.add_argument("--no-advance-head", action="store_true", help="Skip the FCU after each payload")
     p_replay.add_argument("--latency-csv", default=None, help="Write per-block latency rows here")
+    p_replay.add_argument("--newpayload-version", type=int, default=None,
+                          help="Force engine_newPayload version for all records (e.g. 4 for Prague); "
+                               "default: per-record/auto")
 
     p_record = sub.add_parser("record", help="Record blocks from a live EL into a JSONL payload file")
     p_record.add_argument("--source-rpc", required=True, help="Source EL JSON-RPC URL")
@@ -84,6 +87,7 @@ def _run_replay(args, engine: EngineClient) -> dict:
         advance_head=not args.no_advance_head,
         count=args.count,
         latency_csv=args.latency_csv,
+        newpayload_version=args.newpayload_version,
     )
     return driver.run()
 

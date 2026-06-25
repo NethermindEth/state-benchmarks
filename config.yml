@@ -120,7 +120,15 @@ load_test:
   # Prometheus histogram buckets (milliseconds) for locust_request_latency_ms.
   latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
   # How many recent blocks to sample from (calls hit random blocks in [head-N, head]).
+  # At test start the locustfile probes how deep the node can actually serve
+  # state and clamps the window to that band; pruned nodes (e.g. Nethermind
+  # with FlatDb) typically retain far fewer blocks than requested here.
   recent_block_window: 1000
+  # If the node's servable band (after the safety margin) is shallower than
+  # this, pinned block numbers would go stale mid-run — fall back to "latest".
+  min_pinned_window: 8
+  # How often (seconds) to re-pin the block window to the advancing head.
+  block_window_refresh_sec: 30
   addresses:
     - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
     - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
@@ -150,6 +158,7 @@ mock_cl:
     number: null                         # frozen pivot block number (optional)
     interval: 12                         # seconds between forkchoiceUpdated ticks
   replay:
-    payloads: ""                         # JSONL payloads file (see src/mock_cl/payloads.py)
+    payloads: ""                         # JSONL payloads file (see src/mock_cl/payloads.py; build with scripts/rlp_to_mocks.py)
     count: null                          # replay at most this many blocks (null = all)
     latency_csv: ""                      # write per-block latency rows here (optional)
+    newpayload_version: null             # force engine_newPayload version (e.g. 4 for Prague); null = per-record/auto

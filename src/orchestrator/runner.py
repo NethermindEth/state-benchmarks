@@ -132,6 +132,8 @@ def build_mock_cl_command(subcommand: str, mock_cl_cfg: Dict[str, Any]) -> List[
             cmd += ["--count", str(replay["count"])]
         if replay.get("latency_csv"):
             cmd += ["--latency-csv", str(replay["latency_csv"])]
+        if replay.get("newpayload_version") is not None:
+            cmd += ["--newpayload-version", str(replay["newpayload_version"])]
 
     return cmd
 

@@ -22,6 +22,28 @@ def load_config(path: str = "config.yml") -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def resolve_prometheus_url(config_value: Optional[str]) -> str:
+    """Pick the Prometheus URL, letting the environment override the config.
+
+    The infra scripts (start_infra.sh / run_benchmark.sh) source .env.<client>
+    and key everything off PROMETHEUS_PORT, but the aggregator only ever saw the
+    hard-coded `prometheus_url` in config.yml. When a host already runs an
+    unrelated Prometheus on the default :9090 and the benchmark stack is mapped
+    elsewhere (e.g. :9092), that drift silently pointed the aggregator at the
+    wrong server and dropped every cAdvisor metric. Honoring the same env var
+    the scripts use keeps the two in sync.
+
+    Precedence: PROMETHEUS_URL > PROMETHEUS_PORT (localhost) > config > default.
+    """
+    env_url = os.environ.get("PROMETHEUS_URL")
+    if env_url:
+        return env_url
+    env_port = os.environ.get("PROMETHEUS_PORT")
+    if env_port:
+        return f"http://localhost:{env_port}"
+    return config_value or "http://localhost:9090"
+
+
 def query_prometheus(prom_url: str, query: str) -> Optional[float]:
     """Return the query value, or None when the metric is unavailable.
 
@@ -298,7 +320,7 @@ def main():
 
     config = load_config(args.config)
     metrics_cfg = config.get("metrics", {})
-    prom_url = metrics_cfg.get("prometheus_url", "http://localhost:9090")
+    prom_url = resolve_prometheus_url(metrics_cfg.get("prometheus_url"))
     cross_queries = metrics_cfg.get("queries", {})
     client_queries = metrics_cfg.get("client_queries", {}).get(args.client, {})
     load_window = metrics_cfg.get("load_window", "5m")

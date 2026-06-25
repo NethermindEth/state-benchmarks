@@ -35,6 +35,14 @@ LOCUST_USERS = Gauge("locust_users", "Currently spawned Locust users.")
 LOCUST_TEST_RUNNING = Gauge(
     "locust_test_running", "1 while a Locust test is running, 0 otherwise."
 )
+LOCUST_INITIAL_BLOCK = Gauge(
+    "locust_initial_block_number",
+    "Head block number observed when the Locust test started.",
+)
+LOCUST_CURRENT_BLOCK = Gauge(
+    "locust_current_block_number",
+    "Most recent head block number observed during the Locust test.",
+)
 
 
 def load_config(path: str = "config.yml"):
@@ -63,6 +71,10 @@ for _addr in _extra_addresses:
 SLOTS: List[str] = LOAD_CFG.get("slots", ["0x0"])
 ETH_CALL_SHAPES: List[str] = LOAD_CFG.get("eth_call_shapes", ["0x18160ddd"])
 RECENT_BLOCK_WINDOW: int = int(LOAD_CFG.get("recent_block_window", 1000))
+# Below this many usable pinned blocks, fall back to the "latest" tag: pinned
+# block numbers go stale as the node's retained-state band slides forward.
+MIN_PINNED_WINDOW: int = int(LOAD_CFG.get("min_pinned_window", 8))
+BLOCK_WINDOW_REFRESH_SEC: float = float(LOAD_CFG.get("block_window_refresh_sec", 30))
 LATENCY_BUCKETS = tuple(LOAD_CFG.get("latency_buckets", _DEFAULT_LATENCY_BUCKETS))
 _WAIT_CFG = LOAD_CFG.get("wait_time", {"min": 0.1, "max": 0.5})
 WAIT_MIN: float = float(_WAIT_CFG.get("min", 0.1))
@@ -89,6 +101,11 @@ LOCUST_LATENCY = Histogram(
 # Populated in on_test_start. Defaults keep the harness usable even if the
 # RPC bootstrap fails (e.g., dry runs against a stub).
 RECENT_BLOCKS: List[str] = ["latest"]
+
+# Block numbers observed across the run — surfaced in metrics and the final
+# summary so every report ties back to a specific point on the chain.
+INITIAL_HEAD_BLOCK: Optional[int] = None
+LATEST_HEAD_BLOCK: Optional[int] = None
 
 PROOF_SIZES_CSV = os.environ.get("LOCUST_PROOF_SIZES_CSV")
 _PROOF_FLUSH_EVERY = 100  # rows between flushes, so a crash loses at most this many samples
@@ -145,16 +162,64 @@ def _probe_state_depth(host: str, head: int, max_depth: int) -> int:
     return lo
 
 
-def _planned_run_time_sec(environment) -> int:
-    """The --run-time of this test in seconds, or 0 if unknown."""
-    raw = getattr(getattr(environment, "parsed_options", None), "run_time", None)
-    if raw is None:
-        return 0
-    try:
-        from locust.util.timespan import parse_timespan
-        return int(parse_timespan(str(raw)))
-    except Exception:
-        return 0
+def _fetch_head(host: str) -> int:
+    resp = requests.post(
+        host,
+        json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+        timeout=5,
+    )
+    return int(resp.json()["result"], 16)
+
+
+# Blocks to keep clear of the retention edge: covers head advancing between
+# window refreshes (~1 block / 12s) plus slack for probe/refresh latency.
+def _safety_margin() -> int:
+    return 8 + int(BLOCK_WINDOW_REFRESH_SEC // 12)
+
+
+def _compute_block_window(host: str, head: int):
+    """Probe the node's retained-state band and derive the usable window.
+
+    Returns (window, depth, edge_found): `window` block tags ending at head are
+    safe to pin, the node served state `depth` blocks behind head, and
+    `edge_found` is True when a retention edge sits inside the requested
+    window (pruned node) — in that case `window` excludes a safety margin off
+    the edge, since the band slides forward as the node processes blocks.
+    """
+    requested = max(1, min(RECENT_BLOCK_WINDOW, head))
+    depth = _probe_state_depth(host, head, requested)
+    edge_found = depth < requested - 1
+    if not edge_found:
+        return requested, depth, False
+    return max(1, depth + 1 - _safety_margin()), depth, True
+
+
+def _block_window_refresher(environment, host: str):
+    """Re-pin RECENT_BLOCKS to the current head every BLOCK_WINDOW_REFRESH_SEC.
+
+    The retained-state band slides forward as the node processes blocks, so a
+    window pinned once at test start decays into "No state available" errors
+    over the run. If the band shrinks below MIN_PINNED_WINDOW mid-run, fall
+    back to the "latest" tag for the remainder.
+    """
+    global RECENT_BLOCKS, LATEST_HEAD_BLOCK
+    while getattr(environment.runner, "state", None) in ("spawning", "running", "ready"):
+        time.sleep(BLOCK_WINDOW_REFRESH_SEC)
+        try:
+            head = _fetch_head(host)
+            LATEST_HEAD_BLOCK = head
+            LOCUST_CURRENT_BLOCK.set(head)
+            window, depth, edge_found = _compute_block_window(host, head)
+            if edge_found and window < MIN_PINNED_WINDOW:
+                _logger.warning(
+                    f"Retained-state band shrank to {depth + 1} blocks mid-run; "
+                    "switching to the 'latest' tag for the remainder."
+                )
+                RECENT_BLOCKS = ["latest"]
+                return
+            RECENT_BLOCKS = [hex(head - i) for i in range(window)]
+        except Exception as e:
+            _logger.warning(f"Block window refresh failed (keeping previous window): {e}")
 
 
 def _fetch_gas_sender(host: str) -> Optional[str]:
@@ -236,6 +301,7 @@ def _user_count_poller(environment):
 def on_test_start(environment, **kwargs):
     """Fetch head block and pre-compute a window of recent block tags."""
     global RECENT_BLOCKS, GAS_SENDER, _proof_file, _proof_writer
+    global INITIAL_HEAD_BLOCK, LATEST_HEAD_BLOCK
 
     host = environment.host or "http://localhost:8545"
 
@@ -250,33 +316,65 @@ def on_test_start(environment, **kwargs):
                 "Point the benchmark at a dev-mode node or disable gas tests."
             )
     try:
-        resp = requests.post(
-            host,
-            json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
-            timeout=5,
-        )
-        head_hex = resp.json().get("result")
-        head = int(head_hex, 16)
-        window = max(1, min(RECENT_BLOCK_WINDOW, head))
-        depth = _probe_state_depth(host, head, window)
-        if depth + 1 < window:
-            # Pruned node: clamp to the retained band, minus a margin covering
-            # the band sliding forward while the test runs (~1 block / 12s).
-            margin = _planned_run_time_sec(environment) // 12 + 8
-            clamped = max(1, depth + 1 - margin)
-            _logger.warning(
-                f"Node only has state for the last {depth + 1} blocks "
-                f"(requested window {window}); clamping window to {clamped} "
-                f"(margin {margin} blocks for head advancing during the run)."
-            )
-            window = clamped
-        RECENT_BLOCKS = [hex(head - i) for i in range(window)]
-        _logger.info(f"Initialized recent-block window: head={head}, window={window}")
+        head = _fetch_head(host)
     except Exception as e:
         # Fall back to "latest" so tasks still run; flagged in the log so the
         # final report makes the cache-skew risk obvious.
         _logger.warning(f"Failed to fetch head block from {host}: {e}. Falling back to 'latest'.")
         RECENT_BLOCKS = ["latest"]
+    else:
+        INITIAL_HEAD_BLOCK = head
+        LATEST_HEAD_BLOCK = head
+        LOCUST_INITIAL_BLOCK.set(head)
+        LOCUST_CURRENT_BLOCK.set(head)
+        if not _state_available(host, "latest"):
+            # Not a config problem we can route around: the node cannot serve
+            # state at all (mid-sync, flat-db not initialized, ...). Abort
+            # instead of producing a report that is 100% errors.
+            _logger.error(
+                f"Node at {host} cannot serve state even at 'latest' "
+                "(eth_getBalance failed). It is likely still syncing or its "
+                "state database is not initialized — aborting the test."
+            )
+            environment.process_exit_code = 1
+            runner = getattr(environment, "runner", None)
+            if runner is not None:
+                runner.quit()
+            return
+        if not _state_available(host, hex(head)):
+            # The head fetched a moment ago is already unservable — the node's
+            # retained band is shallower than its own processing cadence, so
+            # pinned block numbers would go stale instantly.
+            _logger.warning(
+                f"State at head block {head} is already unavailable by number; "
+                "using the 'latest' tag for all requests."
+            )
+            RECENT_BLOCKS = ["latest"]
+        else:
+            window, depth, edge_found = _compute_block_window(host, head)
+            if edge_found and window < MIN_PINNED_WINDOW:
+                _logger.warning(
+                    f"Node only has state for the last {depth + 1} blocks — too "
+                    f"shallow to pin block numbers (min {MIN_PINNED_WINDOW}); "
+                    "using the 'latest' tag for all requests."
+                )
+                RECENT_BLOCKS = ["latest"]
+            else:
+                if edge_found:
+                    _logger.warning(
+                        f"Node only has state for the last {depth + 1} blocks; "
+                        f"clamping window to {window}."
+                    )
+                RECENT_BLOCKS = [hex(head - i) for i in range(window)]
+                _logger.info(
+                    f"Initialized recent-block window: head={head}, window={window} "
+                    f"(refreshing every {BLOCK_WINDOW_REFRESH_SEC:g}s)"
+                )
+                threading.Thread(
+                    target=_block_window_refresher,
+                    args=(environment, host),
+                    daemon=True,
+                ).start()
 
     if PROOF_SIZES_CSV:
         os.makedirs(os.path.dirname(PROOF_SIZES_CSV) or ".", exist_ok=True)
@@ -302,6 +400,26 @@ def on_test_stop(environment, **kwargs):
         if _proof_file:
             _proof_file.close()
             _proof_file = None
+    # Try to refresh the head one last time so the final report reflects the
+    # node's state at end-of-run, not the last 30s-old refresher tick.
+    host = environment.host or "http://localhost:8545"
+    final_head: Optional[int] = LATEST_HEAD_BLOCK
+    try:
+        final_head = _fetch_head(host)
+        LOCUST_CURRENT_BLOCK.set(final_head)
+    except Exception as e:
+        _logger.warning(f"Failed to fetch final head block from {host}: {e}")
+    if INITIAL_HEAD_BLOCK is None:
+        _logger.info(
+            "Block range for this run: unknown — head fetch failed at test start."
+        )
+    else:
+        end = final_head if final_head is not None else INITIAL_HEAD_BLOCK
+        advanced = end - INITIAL_HEAD_BLOCK
+        _logger.info(
+            f"Block range for this run: start={INITIAL_HEAD_BLOCK} "
+            f"end={end} advanced={advanced}"
+        )
     LOCUST_TEST_RUNNING.set(0)
     LOCUST_USERS.set(0)
 

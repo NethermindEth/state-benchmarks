@@ -126,6 +126,7 @@ class ReplayDriver:
         count: Optional[int] = None,
         latency_csv: Optional[str] = None,
         stop_event=None,
+        newpayload_version: Optional[int] = None,
     ):
         self.engine = engine
         self.records = records
@@ -133,6 +134,10 @@ class ReplayDriver:
         self.count = count
         self.latency_csv = latency_csv
         self.stop_event = stop_event
+        # When set, forces engine_newPayload version for ALL records (overriding the
+        # per-record newpayload_version); these are Prague blocks whose auto-pick
+        # otherwise lands on V3. None => fall back to each record's version (or auto).
+        self.newpayload_version = newpayload_version
 
     def run(self) -> Dict[str, Any]:
         """Drive newPayload(+forkchoiceUpdated) per record; return latency summary."""
@@ -146,11 +151,14 @@ class ReplayDriver:
             if self.stop_event is not None and self.stop_event.is_set():
                 break
 
+            version = self.newpayload_version or record.newpayload_version
             t0 = time.perf_counter()
             np_result = self.engine.new_payload(
                 record.payload,
                 versioned_hashes=record.versioned_hashes,
                 parent_beacon_block_root=record.parent_beacon_block_root,
+                version=version,
+                execution_requests=record.execution_requests,
             )
             np_ms = (time.perf_counter() - t0) * 1000.0
             new_payload_ms.append(np_ms)

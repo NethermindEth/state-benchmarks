@@ -69,16 +69,25 @@ def test_fetch_gas_sender_connection_error():
 
 # ---------- state-depth probing ----------
 
-def _fake_node(head: int, state_depth: int):
+def _fake_node(head: int, state_depth: int, latest_ok=None):
     """requests.post side effect for a node with state for the last
-    `state_depth` blocks (head - state_depth + 1 .. head)."""
+    `state_depth` blocks (head - state_depth + 1 .. head). `latest_ok`
+    overrides whether the "latest" tag is servable (default: whenever any
+    state is, i.e. state_depth > 0)."""
+    if latest_ok is None:
+        latest_ok = state_depth > 0
+
     def post(host, json=None, timeout=None):
         resp = MagicMock()
         if json["method"] == "eth_blockNumber":
             resp.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": hex(head)}
         elif json["method"] == "eth_getBalance":
-            block = int(json["params"][1], 16)
-            if head - block < state_depth:
+            block = json["params"][1]
+            if block == "latest":
+                available = latest_ok
+            else:
+                available = head - int(block, 16) < state_depth
+            if available:
                 resp.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": "0x0"}
             else:
                 resp.json.return_value = {
@@ -125,29 +134,54 @@ def test_probe_state_depth_short_chain():
         assert locustfile._probe_state_depth("http://node:8545", 5, 1000) == 5
 
 
-def test_on_test_start_clamps_window_on_pruned_node():
+def _run_test_start(fake_post):
     env = MagicMock()
     env.host = "http://node:8545"
-    env.parsed_options.run_time = "5m"
-    with patch("locustfile.requests.post", side_effect=_fake_node(head=10_000, state_depth=128)), \
+    with patch("locustfile.requests.post", side_effect=fake_post), \
          patch.object(locustfile, "GAS_TESTS_ENABLED", False), \
          patch.object(locustfile, "PROOF_SIZES_CSV", None):
         locustfile.on_test_start(env)
-    # depth 127 -> band of 128, minus margin (5m/12s + 8 = 33) -> 95 blocks
-    assert len(locustfile.RECENT_BLOCKS) == 95
+    return env
+
+
+def test_on_test_start_clamps_window_on_pruned_node():
+    _run_test_start(_fake_node(head=10_000, state_depth=128))
+    # band of 128, minus margin (8 + 30s refresh / 12s = 10) -> 118 blocks
+    assert len(locustfile.RECENT_BLOCKS) == 118
     assert locustfile.RECENT_BLOCKS[0] == hex(10_000)
-    assert locustfile.RECENT_BLOCKS[-1] == hex(10_000 - 94)
+    assert locustfile.RECENT_BLOCKS[-1] == hex(10_000 - 117)
 
 
 def test_on_test_start_keeps_full_window_on_archive_node():
-    env = MagicMock()
-    env.host = "http://node:8545"
-    env.parsed_options.run_time = "5m"
-    with patch("locustfile.requests.post", side_effect=_fake_node(head=10_000, state_depth=10_000)), \
-         patch.object(locustfile, "GAS_TESTS_ENABLED", False), \
-         patch.object(locustfile, "PROOF_SIZES_CSV", None):
-        locustfile.on_test_start(env)
+    _run_test_start(_fake_node(head=10_000, state_depth=10_000))
     assert len(locustfile.RECENT_BLOCKS) == locustfile.RECENT_BLOCK_WINDOW
+
+
+def test_on_test_start_aborts_when_no_state_at_all():
+    """Even 'latest' has no state: quit the runner instead of running a test
+    whose every request would fail."""
+    env = _run_test_start(_fake_node(head=10_000, state_depth=0))
+    assert env.process_exit_code == 1
+    env.runner.quit.assert_called_once()
+
+
+def test_on_test_start_falls_back_to_latest_when_head_unservable_by_number():
+    """'latest' works but the just-fetched head is already unservable by
+    number — pinned blocks would go stale instantly."""
+    _run_test_start(_fake_node(head=10_000, state_depth=0, latest_ok=True))
+    assert locustfile.RECENT_BLOCKS == ["latest"]
+
+
+def test_on_test_start_falls_back_to_latest_on_too_shallow_band():
+    _run_test_start(_fake_node(head=10_000, state_depth=5))
+    assert locustfile.RECENT_BLOCKS == ["latest"]
+
+
+def test_on_test_start_pins_full_short_dev_chain():
+    """A 3-block dev chain with full state pins all of it — no retention edge,
+    so the minimum-window rule does not apply."""
+    _run_test_start(_fake_node(head=3, state_depth=100))
+    assert locustfile.RECENT_BLOCKS == [hex(3), hex(2), hex(1)]
 
 
 # ---------- eth_send_transaction task ----------

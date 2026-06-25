@@ -175,6 +175,25 @@ def test_load_payloads_parses_jsonl(tmp_path):
     assert records[1].fork == "cancun"
 
 
+def test_load_payloads_stamps_zero_beacon_root_and_reads_v4_fields(tmp_path):
+    p = tmp_path / "payloads.jsonl"
+    lines = [
+        # No parent_beacon_block_root -> stamped with the zero hash (not null).
+        {"payload": {"blockHash": "0xaaa", "blockNumber": "0x10", "blobGasUsed": "0x0"},
+         "versioned_hashes": [], "execution_requests": [], "newpayload_version": 4},
+        # Explicit null -> also stamped.
+        {"payload": {"blockHash": "0xbbb", "blockNumber": "0x11"},
+         "parent_beacon_block_root": None},
+    ]
+    p.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+
+    records = list(payloads_mod.load_payloads(str(p)))
+    assert records[0].parent_beacon_block_root == payloads_mod.ZERO_BEACON_ROOT
+    assert records[0].execution_requests == []
+    assert records[0].newpayload_version == 4
+    assert records[1].parent_beacon_block_root == payloads_mod.ZERO_BEACON_ROOT
+
+
 # ---------- drivers: ReplayDriver ----------
 
 class _FakeEngine:
@@ -183,9 +202,16 @@ class _FakeEngine:
     def __init__(self, statuses):
         self._statuses = list(statuses)
         self.calls = []
+        self.new_payload_kwargs = []
 
-    def new_payload(self, payload, versioned_hashes=None, parent_beacon_block_root=None):
+    def new_payload(self, payload, versioned_hashes=None, parent_beacon_block_root=None,
+                    version=None, execution_requests=None):
         self.calls.append(("new_payload", payload.get("blockHash")))
+        self.new_payload_kwargs.append({
+            "version": version,
+            "execution_requests": execution_requests,
+            "parent_beacon_block_root": parent_beacon_block_root,
+        })
         return {"status": self._statuses.pop(0)}
 
     def forkchoice_updated(self, head, **kwargs):
@@ -193,7 +219,7 @@ class _FakeEngine:
         return {"payloadStatus": {"status": "VALID"}}
 
 
-def _record(block_hash, number):
+def _record(block_hash, number, newpayload_version=None, execution_requests=None):
     return payloads_mod.PayloadRecord(
         payload={"blockHash": block_hash, "blockNumber": hex(number)},
         block_hash=block_hash,
@@ -201,6 +227,8 @@ def _record(block_hash, number):
         versioned_hashes=None,
         parent_beacon_block_root=None,
         fork=None,
+        execution_requests=execution_requests,
+        newpayload_version=newpayload_version,
     )
 
 
@@ -241,6 +269,24 @@ def test_replay_driver_no_advance_head():
     records = [_record("0x1", 1), _record("0x2", 2)]
     ReplayDriver(engine, records, advance_head=False).run()
     assert all(call[0] == "new_payload" for call in engine.calls)
+
+
+def test_replay_driver_forces_newpayload_version_over_per_record():
+    engine = _FakeEngine(["VALID", "VALID"])
+    # Record carries V3; the driver override forces V4 for all.
+    records = [_record("0x1", 1, newpayload_version=3), _record("0x2", 2)]
+    ReplayDriver(engine, records, advance_head=False, newpayload_version=4).run()
+    assert [kw["version"] for kw in engine.new_payload_kwargs] == [4, 4]
+
+
+def test_replay_driver_uses_per_record_version_without_override():
+    engine = _FakeEngine(["VALID", "VALID"])
+    records = [_record("0x1", 1, newpayload_version=4, execution_requests=[]),
+               _record("0x2", 2)]
+    ReplayDriver(engine, records, advance_head=False).run()
+    assert engine.new_payload_kwargs[0]["version"] == 4
+    assert engine.new_payload_kwargs[0]["execution_requests"] == []
+    assert engine.new_payload_kwargs[1]["version"] is None
 
 
 # ---------- drivers: PivotDriver ----------
