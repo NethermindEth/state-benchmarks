@@ -4,6 +4,7 @@ import Section from '../components/Section.astro';
 import Card from '../components/ui/Card.astro';
 import Stat from '../components/ui/Stat.astro';
 import Placeholder from '../components/ui/Placeholder.astro';
+import Callout from '../components/ui/Callout.astro';
 import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
 import CompositionChart from '../components/charts/CompositionChart.tsx';
 import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx';
@@ -48,6 +49,9 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       <Card title="Account-trie depth across milestones">
         <p class="text-sm text-ink-400 mb-4">Where account leaves sit in the trie, per milestone. 1× and 3.5× nearly coincide (similar account counts); 5× / 7× / 10× shift progressively deeper (peak walks from depth 9 → 10) — depth tracks account count, the log₁₆ law. Across 1× → 10× the median moves under one full level.</p>
         <TrieDepthChart client:visible levels={depth.levels} series={depth.series} pending={depth.pending} />
+        <Callout type="math" title="Why depth barely moves — the log₁₆ law">
+          A 16-way trie has expected depth ≈ log₁₆(N). Mainnet → 5× deepens by <strong class="text-ink-100">+0.59 levels</strong> (7.61 → 8.20), and log₁₆(5.2×) = 0.59 — a textbook match; 5× → 10× adds only <strong class="text-ink-100">+0.25</strong> (= log₁₆(2×)). The account trie is provably <em>full</em> through depth 6 — exactly 16⁰…16⁶ branch nodes were counted — so leaves land at depth 8–9 and the whole 1× → 10× climb moves the median under one level. This one fact is why witnesses stay small (next chart) and why node counts scale linearly with leaf count, which let us predict the 7× / 10× counts before scanning them.
+        </Callout>
       </Card>
 
       <Card title="Storage-trie depth across milestones">
@@ -71,6 +75,10 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
           theory={[{ mult: 1, y: 3820 }, { mult: 3.5, y: 3825 }, { mult: 5, y: 4083 }, { mult: 7, y: 4136 }, { mult: 10, y: 4192 }]}
         />
         <p class="mt-4 text-sm text-ink-400">Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why 3.5× (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher. {proofs.finding}</p>
+        <Callout type="note" title="What this means for statelessness">
+          A block's witness ≈ <strong class="text-ink-100">(state accesses) × (per-access witness)</strong>. The per-access term is log-bounded — a single proof grows only ~11% across a 10× state and account-proof maxDepth p50 holds at 8, ticking to 9 only at 10×. So the lever that moves a block's witness budget is the <em>number of accesses</em> (and gas repricing), not individual proof size. This is the pre-Verkle MPT baseline a binary tree (<a href="https://eips.ethereum.org/EIPS/eip-7864" target="_blank" rel="noreferrer noopener" class="text-accent-400 hover:text-accent-300">EIP-7864</a>) is measured against — track the 16-slot combined witness (~23–25 KB) as the per-access unit.
+          <span class="mt-3 block text-xs text-ink-500">Caveat: per-proof <code>nodeLookups</code> <em>drops</em> on the bloatnets (EOA p50 112 → 72) — a flat-DB residency artifact (freshly-written state is densely packed; mainnet is fragmented by years of compaction), not a real cost reduction. Witness <em>bytes</em> are client-agnostic — EIP-1186 proofs are byte-identical across clients for the same state root — and stay the comparable size metric.</span>
+        </Callout>
       </Card>
 
       <Card title="Snap sync — Nethermind vs Geth">
@@ -107,6 +115,10 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         <p class="mt-4 text-sm text-ink-400">{snap.finding}</p>
         <p class="mt-3 text-sm text-ink-400">{snap.geth5x}</p>
         <p class="mt-3 text-xs text-ink-500">{snap.caveat}</p>
+
+        <Callout type="note" title="Why a 10× state isn't a 10× sync">
+          Snap sync parallelizes <em>across</em> contracts, but a single contract's storage trie downloads as one <strong class="text-ink-100">sequential chain of range requests</strong>. The ~4,097 mega-contracts that absorb the bulk of the slots (the storage-spam tail) are the non-parallelizable serial fraction — Amdahl's law — so they stall the account frontier for hours (Geth) and form the long final phase (NM). The clients just schedule that work oppositely: NM drains the mega-tries last as a clean phase; Geth front-loads them and goes stop-go. And in the 5× run the box sat <strong class="text-ink-100">~80% idle</strong> — the ceiling is single-peer request concurrency, not CPU or disk, so the highest-leverage fix is more serving peers, not faster hardware.
+        </Callout>
 
         <div class="mt-6 rounded-xl border border-signal-good/30 bg-signal-good/5 p-4 text-sm text-ink-200">
           <span class="font-mono text-signal-good text-xs uppercase tracking-wider">verified</span>
