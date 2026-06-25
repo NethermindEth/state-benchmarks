@@ -5,46 +5,48 @@
     { "key": "x1",  "label": "1× mainnet", "color": "#00b3ff" },
     { "key": "x35", "label": "3.5×",       "color": "#ff9900" },
     { "key": "x5",  "label": "5×",          "color": "#34d399" },
-    { "key": "x7",  "label": "7×",          "color": "#c084fc" }
+    { "key": "x7",  "label": "7×",          "color": "#c084fc" },
+    { "key": "x10", "label": "10×",         "color": "#f472b6" }
   ],
-  "pending": ["10×"],
+  "pending": [],
   "levels": [
-    { "depth": 8,  "x1": 92723918,  "x35": 91044153,  "x5": 1186965,    "x7": 91758 },
-    { "depth": 9,  "x1": 251137398, "x35": 266444381, "x5": 1251962794, "x7": 1453160383 },
-    { "depth": 10, "x1": 29870177,  "x35": 32441223,  "x5": 683109803,  "x7": 1206743860 },
-    { "depth": 11, "x1": 1543551,   "x35": 1710796,   "x5": 55646740,   "x7": 106112731 },
-    { "depth": 12, "x1": 12329,     "x35": 13880,     "x5": 1339738,    "x7": 3297266 },
-    { "depth": 13, "x1": 144,       "x35": 158,       "x5": 6936,       "x7": 17676 },
-    { "depth": 14, "x1": 0,         "x35": 0,         "x5": 10,         "x7": 42 }
+    { "depth": 8,  "x1": 92723918,  "x35": 91044153,  "x5": 1186965,    "x7": 91758,      "x10": 1619 },
+    { "depth": 9,  "x1": 251137398, "x35": 266444381, "x5": 1251962794, "x7": 1453160383, "x10": 1574419925 },
+    { "depth": 10, "x1": 29870177,  "x35": 32441223,  "x5": 683109803,  "x7": 1206743860, "x10": 2150008011 },
+    { "depth": 11, "x1": 1543551,   "x35": 1710796,   "x5": 55646740,   "x7": 106112731,  "x10": 211605959 },
+    { "depth": 12, "x1": 12329,     "x35": 13880,     "x5": 1339738,    "x7": 3297266,    "x10": 8436497 },
+    { "depth": 13, "x1": 144,       "x35": 158,       "x5": 6936,       "x7": 17676,      "x10": 49540 },
+    { "depth": 14, "x1": 0,         "x35": 0,         "x5": 10,         "x7": 42,         "x10": 126 }
   ],
-  "note": "Account-trie leaves by depth level. 1× and 3.5× nearly coincide (≈375M vs 392M accounts → same depth); 5× (1.99B accounts) shifts a level deeper, and 7× (2.77B accounts) deeper still — depth tracks account count, the log₁₆ law. 10× is pending.",
+  "note": "Account-trie leaves by depth level. 1× and 3.5× nearly coincide (≈375M vs 392M accounts → same depth); 5×, 7×, 10× shift progressively deeper as account count grows (the peak walks from depth 9 → 10) — depth tracks log₁₆ of the account count. From 1× to 10× the median moves under one full level.",
 
   "storageDepth": {
     "metric": "storage-trie leaf count by depth level (aggregate over all contracts)",
-    "source": "1× nm StateComposition snapshot (block 24,927,663); 3.5× PRISTINE scan (block 24,358,000); 5× #29 (block 24,546,596); 7× #35 (block 24,641,589). Value-node counts per level.",
+    "source": "1× nm StateComposition snapshot (block 24,927,663); 3.5× PRISTINE scan (block 24,358,000); 5× #29 (block 24,546,596); 7× #35 (block 24,641,589); 10× #29 (block 24,759,769). Value-node counts per level.",
     "series": [
       { "key": "x1",  "label": "1× mainnet", "color": "#00b3ff" },
       { "key": "x35", "label": "3.5×",       "color": "#ff9900" },
       { "key": "x5",  "label": "5×",          "color": "#34d399" },
-      { "key": "x7",  "label": "7×",          "color": "#c084fc" }
+      { "key": "x7",  "label": "7×",          "color": "#c084fc" },
+      { "key": "x10", "label": "10×",         "color": "#f472b6" }
     ],
-    "pending": ["10×"],
+    "pending": [],
     "levels": [
-      { "depth": 1,  "x1": 14439728,  "x35": 12950471,   "x5": 12950471,   "x7": 12950471 },
-      { "depth": 2,  "x1": 40986645,  "x35": 39715548,   "x5": 39715548,   "x7": 39715548 },
-      { "depth": 3,  "x1": 55475791,  "x35": 49128269,   "x5": 49128269,   "x7": 49128269 },
-      { "depth": 4,  "x1": 131990165, "x35": 125078100,  "x5": 125078910,  "x7": 125078910 },
-      { "depth": 5,  "x1": 309966764, "x35": 291007087,  "x5": 291000717,  "x7": 291000717 },
-      { "depth": 6,  "x1": 344341910, "x35": 328654078,  "x5": 329035928,  "x7": 329404930 },
-      { "depth": 7,  "x1": 329964467, "x35": 457221670,  "x5": 457900379,  "x7": 462693811 },
-      { "depth": 8,  "x1": 227817499, "x35": 1014274712, "x5": 1081059038, "x7": 1136934777 },
-      { "depth": 9,  "x1": 77591989,  "x35": 3772034465, "x5": 4212789744, "x7": 5961387972 },
-      { "depth": 10, "x1": 6039761,   "x35": 1041201523, "x5": 1110362903, "x7": 1827380921 },
-      { "depth": 11, "x1": 164321,    "x35": 76094345,   "x5": 80379872,   "x7": 136706454 },
-      { "depth": 12, "x1": 810,       "x35": 1396434,    "x5": 1434481,    "x7": 2643525 },
-      { "depth": 13, "x1": 2,         "x35": 6188,       "x5": 6314,       "x7": 11740 },
-      { "depth": 14, "x1": 0,         "x35": 8,          "x5": 8,          "x7": 16 }
+      { "depth": 1,  "x1": 14439728,  "x35": 12950471,   "x5": 12950471,   "x7": 12950471,   "x10": 12950471 },
+      { "depth": 2,  "x1": 40986645,  "x35": 39715548,   "x5": 39715548,   "x7": 39715548,   "x10": 39715548 },
+      { "depth": 3,  "x1": 55475791,  "x35": 49128269,   "x5": 49128269,   "x7": 49128269,   "x10": 49128269 },
+      { "depth": 4,  "x1": 131990165, "x35": 125078100,  "x5": 125078910,  "x7": 125078910,  "x10": 125078910 },
+      { "depth": 5,  "x1": 309966764, "x35": 291007087,  "x5": 291000717,  "x7": 291000717,  "x10": 291000717 },
+      { "depth": 6,  "x1": 344341910, "x35": 328654078,  "x5": 329035928,  "x7": 329404930,  "x10": 329350044 },
+      { "depth": 7,  "x1": 329964467, "x35": 457221670,  "x5": 457900379,  "x7": 462693811,  "x10": 464138485 },
+      { "depth": 8,  "x1": 227817499, "x35": 1014274712, "x5": 1081059038, "x7": 1136934777, "x10": 1136875921 },
+      { "depth": 9,  "x1": 77591989,  "x35": 3772034465, "x5": 4212789744, "x7": 5961387972, "x10": 6258869631 },
+      { "depth": 10, "x1": 6039761,   "x35": 1041201523, "x5": 1110362903, "x7": 1827380921, "x10": 4929761100 },
+      { "depth": 11, "x1": 164321,    "x35": 76094345,   "x5": 80379872,   "x7": 136706454,  "x10": 517085110 },
+      { "depth": 12, "x1": 810,       "x35": 1396434,    "x5": 1434481,    "x7": 2643525,    "x10": 22881193 },
+      { "depth": 13, "x1": 2,         "x35": 6188,       "x5": 6314,       "x7": 11740,      "x10": 149954 },
+      { "depth": 14, "x1": 0,         "x35": 8,          "x5": 8,          "x7": 16,         "x10": 428 }
     ],
-    "note": "The opposite of account depth: mainnet storage tries are shallow (most leaves at depths 5–7, since most contracts hold 1–3 slots), but 3.5× / 5× / 7× pile up at depth 9 — the storage-spam mega-tries, growing with each milestone. The per-contract histogram's open \"16k+\" bucket hides this; the depth distribution exposes it. 10× pending."
+    "note": "The opposite of account depth: mainnet storage tries are shallow (most leaves at depths 5–7, since most contracts hold 1–3 slots), but 3.5× → 10× pile up at depths 9–10 — the storage-spam mega-tries deepening each milestone (avg 7.24 → 7.81 from 5× to 10×). The per-contract histogram's open \"16k+\" bucket hides this; the depth distribution exposes it."
   }
 }

@@ -33,8 +33,11 @@
       "label": "7.0x · measured exact 7× (2026-06-15) — 1.55 TB, 7.001× mainnet"
     },
     {
-      "mult": 10.0, "status": "target", "measured": false, "pending": true, "slotNote": "not generated",
-      "label": "10.0x · final target — not yet generated"
+      "mult": 10.0, "status": "done", "measured": true, "block": 24759769,
+      "totalGB": 2220.7, "acctGB": 606.2, "storGB": 1480.2, "codeGB": 134.3,
+      "accounts": 3944, "storage": 14177, "contracts": 24.3,
+      "accountDepth": 8.45, "branchOccupancy": 3.91,
+      "label": "10.0x · measured exact 10× (2026-06-24) — 2.22 TB, 10.03× mainnet"
     }
   ],
   "units": {
@@ -43,5 +46,5 @@
     "storage": "millions of storage slots",
     "codeGB": "GB of contract bytecode"
   },
-  "note": "1×, 3.5×, 5×, and 7× are exact sidecar full-scan measurements (state-benchmarks issues #5, #29, #35, and the inherited x3.5 statecomp scan @ block 24,358,000). 3.5× is the inherited Bloatnet starting state — storage-skewed and off-ratio; 5× and 7× hold the true mainnet composition. 10× is an empty slot until generated and scanned."
+  "note": "All five milestones are exact full-scan measurements (state-benchmarks issues #5, #29, #35, and the inherited x3.5 statecomp scan @ block 24,358,000). 3.5× is the inherited Bloatnet starting state — storage-skewed and off-ratio; 5×, 7×, and 10× hold the true mainnet composition (10× converged tightest at 27.30 / 66.65 / 6.05). The 10× state is the project's headline target — 2.22 TB, 10.03× mainnet."
 }
