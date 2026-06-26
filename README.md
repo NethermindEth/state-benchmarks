@@ -2,7 +2,7 @@
 
 Benchmark Ethereum execution clients - Nethermind, Geth, Besu, Reth, Erigon - under a realistic, repeatable workload
 
-The framework drives a node through a full benchmark cycle and produces a comparable report at the end.
+The framework drives a node through a full cycle (mount snapshot, start node, wait untill RPC is avaible, start test, stop the node) and produces a comparable report at the end (json/csv reports and grafana).
 
 Everything is configuration-driven and runs locally with Docker. A pre-provisioned Grafana dashboard shows every metric live while the benchmark runs.
 
@@ -48,6 +48,7 @@ uv sync
 | `src/orchestrator/runner.py`           | Top-level CLI; manages docker, sync, load test, aggregator.        |
 | `src/load_tests/locustfile.py`         | Locust workload (random recent blocks, proof-size capture).        |
 | `src/metrics/aggregator.py`            | Prometheus + Locust → per-run JSON/CSV + regression check.         |
+| `src/orchestrator/overlay.py`          | Optional overlayfs wrapper keeping a snapshot DB pristine per run.  |
 | `config.yml` / `remote-config.yml`     | Production configs (local clients / remote node).                  |
 | `test-config.yml`                      | Config for the local Geth `--dev` smoke stack.                     |
 | `docker/docker-compose.clients.yml`    | Real-client compose (Nethermind/Geth/Besu/Reth/Erigon).           |
@@ -326,6 +327,49 @@ mock_cl:
 ```
 
 Back-compat: if `consensus_mode` is unset, the legacy boolean applies (`consensus: true` → lighthouse, `false` → none). `CONSENSUS_MODE` in the environment or repo-root `.env` overrides the config. With `consensus_mode: "mock"`, the orchestrator starts the EL only (no Lighthouse) and launches the pivot driver in the background so the frozen target snap-syncs; it's terminated on tear-down.
+
+## Snapshot isolation (overlayfs)
+
+When a benchmark drives the mock-CL **replay** driver, the client writes new blocks straight into the on-disk snapshot it bind-mounts. That permanently mutates the snapshot — so the next client can no longer start from the *exact same* block, and re-extracting a multi-hundred-GB snapshot is slow or impossible on a space-constrained disk.
+
+The optional overlay feature (`src/orchestrator/overlay.py`) solves this by stacking a Linux `overlayfs` mount on top of the pristine snapshot, so every run gets a private, throwaway copy-on-write layer while the snapshot underneath is never touched:
+
+| Layer        | Path                  | Role                                  |
+|--------------|-----------------------|---------------------------------------|
+| `lowerdir`   | the snapshot          | read-only — never modified            |
+| `upperdir`   | `<scratch>/upper`     | all writes land here                   |
+| `workdir`    | `<scratch>/work`      | overlay bookkeeping                    |
+| `merged`     | `<scratch>/merged`    | what the container actually mounts     |
+
+The container reads and writes through `merged`; restoring the snapshot is just unmounting and deleting the scratch dirs. Crucially, **the overlay is restored before each run** — `up` first unmounts any stale overlay and wipes scratch, *then* mounts fresh, so every run starts from the pristine snapshot regardless of how the previous one ended (self-healing after a crash). Teardown unmounts and wipes again, leaving the snapshot pristine for the next client and freeing the scratch disk.
+
+Both run flows use the same module and config:
+
+* **Orchestrator-managed** (`infrastructure.manage: true`): `runner.py` mounts the overlay before `compose up` (SSH-aware — it runs wherever Docker runs), repoints the client's DB bind variable at the merged dir, and tears it down on exit.
+* **Template-managed** (`infrastructure.manage: false`): the template `start_infra.sh` scripts own the lifecycle, mounting on start and unmounting on `down`.
+
+Configure it under a top-level `overlay:` block. It is **disabled by default**, in which case the raw snapshot is bind-mounted exactly as before.
+
+```yaml
+overlay:
+  enabled: false
+  lowerdir: "/mnt/bigdata/snapshot_mainnet_neth/mainnet"  # pristine snapshot (matches the DB bind path)
+  scratch_dir: "/mnt/bigdata/overlay/nethermind"          # holds upper/ work/ merged/ (beside lowerdir if omitted)
+  db_path_env: "NETHERMIND_DB_PATH"                        # compose bind var repointed at <scratch_dir>/merged
+  name: "mainnet-overlay"
+  sudo: true
+```
+
+**Requirements:** Linux, mount privileges (`sudo`), and a `scratch_dir` on an xattr-capable filesystem (ext4/xfs) with room for the run's writes — keep it on the big disk beside the snapshot. (macOS has no `overlayfs`, so this is a remote/Linux-host feature.)
+
+You can also drive it directly, which is what both flows call under the hood:
+
+```bash
+PYTHONPATH=src uv run python -m orchestrator.overlay up     --config config.yml   # restore + mount fresh
+PYTHONPATH=src uv run python -m orchestrator.overlay status --config config.yml   # is it mounted?
+PYTHONPATH=src uv run python -m orchestrator.overlay env    --config config.yml   # print `export <db_path_env>=<merged>`
+PYTHONPATH=src uv run python -m orchestrator.overlay down   --config config.yml   # unmount + wipe scratch
+```
 
 ## Per-client templates (`templates/`)
 
