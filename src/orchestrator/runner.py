@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 import requests
 import yaml
 
+import overlay as overlay_mod
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,12 @@ CONSENSUS = False
 # FROZEN milestone snapshots — see src/mock_cl) or "none".
 CONSENSUS_MODE = "lighthouse"
 MOCK_CL: Dict[str, Any] = {}
+# Overlayfs snapshot isolation (see src/orchestrator/overlay.py). OVERLAY is the
+# raw `overlay:` YAML dict; CONFIG_PATH is needed to invoke the overlay CLI on
+# the (possibly remote) docker host. Only acted on when MANAGE_INFRA is true —
+# template flows (manage: false) own the overlay lifecycle from start_infra.sh.
+OVERLAY: Dict[str, Any] = {}
+CONFIG_PATH = "config.yml"
 # Background mock-CL pivot driver process (snap-sync mode); None when not running.
 MOCK_CL_PROC: Optional[subprocess.Popen] = None
 RPC_STARTUP_TIMEOUT = 300
@@ -155,16 +163,52 @@ def stop_mock_cl():
         MOCK_CL_PROC = None
 
 
+def overlay_enabled() -> bool:
+    """True when an enabled overlay section is configured (cheap, no side effects)."""
+    try:
+        return overlay_mod.parse_overlay_config(OVERLAY) is not None
+    except ValueError as e:
+        # Misconfigured (enabled but missing a required field) — surface loudly.
+        raise RuntimeError(f"Invalid overlay config: {e}")
+
+
+def run_overlay_action(action: str):
+    """Invoke `python -m orchestrator.overlay <action>` on the docker host.
+
+    Routed through run_cmd so the mount happens wherever compose runs (the
+    remote host when ssh_command is set, local otherwise). `env PYTHONPATH=src`
+    is embedded in the command so it survives the SSH hop and matches the
+    `python -m mock_cl` invocation convention.
+    """
+    run_cmd([
+        "env", "PYTHONPATH=src",
+        "uv", "run", "python", "-m", "orchestrator.overlay",
+        action, "--config", CONFIG_PATH,
+    ])
+
+
 def start_infrastructure(client: str):
     if not MANAGE_INFRA:
         logger.info("Infrastructure management is disabled in config. Skipping start.")
         return
 
+    # Overlay must be mounted before the client container binds the merged dir.
+    # `up` restores first (wipe stale overlay) so each run starts pristine.
+    client_env_prefix: List[str] = []
+    if overlay_enabled():
+        cfg = overlay_mod.parse_overlay_config(OVERLAY)
+        logger.info(f"Setting up overlay snapshot (lower={cfg.lowerdir} -> merged={cfg.merged_dir})...")
+        run_overlay_action("up")
+        # Repoint the compose bind var at the merged dir. `env VAR=val` prefixes
+        # the up command so it overrides --env-file both locally and over SSH
+        # (compose interpolation gives the process environment precedence).
+        client_env_prefix = ["env", f"{cfg.db_path_env}={cfg.merged_dir}"]
+
     logger.info("Starting monitoring stack...")
     run_cmd(compose_cmd(MONITORING_COMPOSE) + ["up", "-d"])
 
     logger.info(f"Starting {client} node...")
-    run_cmd(compose_cmd(CLIENTS_COMPOSE) + ["up", "-d", client])
+    run_cmd(client_env_prefix + compose_cmd(CLIENTS_COMPOSE) + ["up", "-d", client])
 
     if CONSENSUS_MODE == "lighthouse":
         # Each EL client has a matching lighthouse-<client> service in the
@@ -208,6 +252,15 @@ def stop_infrastructure():
         run_cmd(compose_cmd(MONITORING_COMPOSE) + ["down", "-v"])
     except subprocess.CalledProcessError:
         pass
+
+    # Containers are down, so the merged dir is no longer in use — unmount the
+    # overlay and wipe scratch, restoring the pristine snapshot and freeing disk.
+    if overlay_enabled():
+        logger.info("Tearing down overlay snapshot (restoring pristine state)...")
+        try:
+            run_overlay_action("down")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Overlay teardown failed: {e}")
 
 def rpc_probe(method: str, params: Optional[list] = None, timeout: int = 5) -> tuple:
     """Single JSON-RPC call; returns (result, error_detail).
@@ -526,7 +579,9 @@ def main():
     args = parser.parse_args()
 
     global CONFIG, RPC_URL, SSH_CMD, MANAGE_INFRA, MONITORING_COMPOSE, CLIENTS_COMPOSE, DATA_DIRS, \
-        COMPOSE_CMD, CONSENSUS, CONSENSUS_MODE, MOCK_CL, RPC_STARTUP_TIMEOUT, SYNC_HEAD_FRESHNESS_SEC
+        COMPOSE_CMD, CONSENSUS, CONSENSUS_MODE, MOCK_CL, RPC_STARTUP_TIMEOUT, SYNC_HEAD_FRESHNESS_SEC, \
+        OVERLAY, CONFIG_PATH
+    CONFIG_PATH = args.config
     CONFIG = load_config(args.config)
     nodes_cfg = CONFIG.get("nodes", {})
     RPC_URL = nodes_cfg.get("rpc_url", "http://localhost:8545")
@@ -548,6 +603,7 @@ def main():
     if env_mode:
         CONSENSUS_MODE = env_mode.strip()
     MOCK_CL = CONFIG.get("mock_cl", {}) or {}
+    OVERLAY = CONFIG.get("overlay", {}) or {}
     RPC_STARTUP_TIMEOUT = int(nodes_cfg.get("rpc_startup_timeout_sec", 300))
     SYNC_HEAD_FRESHNESS_SEC = int(nodes_cfg.get("sync_head_freshness_sec", 120))
     COMPOSE_CMD = detect_compose_cmd() if MANAGE_INFRA else ["docker-compose"]

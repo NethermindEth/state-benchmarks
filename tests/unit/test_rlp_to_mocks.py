@@ -37,7 +37,7 @@ def _qty(n):
     return n.to_bytes((n.bit_length() + 7) // 8, "big")
 
 
-def _make_payload_record():
+def _make_payload_record(block_number=0x173ac71):
     """Build one length-prefixed RLP ExecutionPayloadV3 body for tests."""
     fields = [
         _enc_bytes(b"\x11" * 32),   # 0 parentHash
@@ -46,7 +46,7 @@ def _make_payload_record():
         _enc_bytes(b"\x44" * 32),   # 3 receiptsRoot
         _enc_bytes(b"\x00" * 256),  # 4 logsBloom
         _enc_bytes(b"\x55" * 32),   # 5 prevRandao
-        _enc_bytes(_qty(0x173ac71)),  # 6 blockNumber = 24358001
+        _enc_bytes(_qty(block_number)),  # 6 blockNumber (default 24358001)
         _enc_bytes(_qty(0x6a19e001)),  # 7 gasLimit
         _enc_bytes(_qty(0x5a5da)),  # 8 gasUsed = 370138
         _enc_bytes(_qty(1780080641)),  # 9 timestamp
@@ -115,6 +115,36 @@ def test_to_qty_and_to_data_encodings():
     assert r2m._to_qty(b"\x01\x00") == "0x100"
     assert r2m._to_data(b"") == "0x"
     assert r2m._to_data(b"\x00\xab") == "0x00ab"
+
+
+def test_block_number_of_peeks_without_full_decode():
+    body = _make_payload_record(block_number=24359461)[4:]  # strip 4-byte length prefix
+    assert r2m.block_number_of(body) == 24359461
+
+
+def test_convert_slices_by_start_block_and_count(tmp_path):
+    # Ten records, blocks 24359455..24359464.
+    stream = b"".join(_make_payload_record(block_number=24359455 + i) for i in range(10))
+    in_path = tmp_path / "payloads.bin"
+    out_path = tmp_path / "slice.jsonl"
+    in_path.write_bytes(stream)
+
+    written, first_block, last_block = r2m.convert(
+        str(in_path), str(out_path),
+        newpayload_version=4,
+        parent_beacon_block_root=r2m.ZERO_BEACON_ROOT,
+        versioned_hashes=[],
+        execution_requests=[],
+        fork="prague",
+        start_block=24359461,
+        count=2,
+    )
+
+    assert written == 2
+    assert first_block == 24359461
+    assert last_block == 24359462
+    blocks = [int(json.loads(l)["payload"]["blockNumber"], 16) for l in out_path.read_text().splitlines()]
+    assert blocks == [24359461, 24359462]
 
 
 def test_iter_records_rejects_truncated_stream():

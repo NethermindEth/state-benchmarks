@@ -85,6 +85,40 @@ def iter_records(data):
         off += length
 
 
+def iter_record_bodies(f):
+    """Stream RLP bodies from an open binary file (4-byte length + body each).
+
+    Unlike iter_records (which takes the whole stream in memory), this reads one
+    record at a time, so multi-hundred-GB inputs can be sliced without loading
+    them.
+    """
+    while True:
+        len_prefix = f.read(4)
+        if not len_prefix:
+            return
+        if len(len_prefix) < 4:
+            raise ValueError("truncated length prefix")
+        length = int.from_bytes(len_prefix, "big")
+        body = f.read(length)
+        if len(body) < length:
+            raise ValueError(f"record claims {length} bytes, only {len(body)} present")
+        yield body
+
+
+def block_number_of(body):
+    """Cheaply read just blockNumber (field 6) from an ExecutionPayload RLP body.
+
+    Decodes only the first 7 (small) fields and skips the large transactions
+    list, so seeking to a start block over millions of txs stays fast.
+    """
+    prefix = body[0]
+    cursor = 1 if prefix < 0xf8 else 1 + (prefix - 0xf7)
+    item = None
+    for _ in range(7):
+        item, cursor = _decode(body, cursor)
+    return int.from_bytes(item, "big") if item else 0
+
+
 # ---------- hex encoding (Engine-API DATA vs QUANTITY) ----------
 
 def _to_data(b):
@@ -153,18 +187,23 @@ def _csv_list(raw):
 
 
 def convert(in_path, out_path, *, newpayload_version, parent_beacon_block_root,
-            versioned_hashes, execution_requests, fork):
+            versioned_hashes, execution_requests, fork, start_block=None, count=None):
     """Read the RLP stream at `in_path`, write JSONL records to `out_path`.
 
-    Returns (count, first_block, last_block).
-    """
-    with open(in_path, "rb") as f:
-        data = f.read()
+    Streams the input one record at a time. With `start_block`, records below it
+    are skipped via a cheap block-number peek (no full decode); with `count`,
+    conversion stops after that many records are written. Together they slice a
+    small window out of a huge ordered stream without loading or fully decoding
+    all of it — e.g. extract the N blocks following a snapshot's head.
 
-    count = 0
+    Returns (written, first_block, last_block).
+    """
+    written = 0
     first_block = last_block = None
-    with open(out_path, "w") as out:
-        for body in iter_records(data):
+    with open(in_path, "rb") as f, open(out_path, "w") as out:
+        for body in iter_record_bodies(f):
+            if start_block is not None and block_number_of(body) < start_block:
+                continue
             decoded, _ = _decode(body)
             payload = payload_from_rlp(decoded)
             record = {
@@ -179,8 +218,10 @@ def convert(in_path, out_path, *, newpayload_version, parent_beacon_block_root,
             block_number = int(payload["blockNumber"], 16)
             first_block = block_number if first_block is None else first_block
             last_block = block_number
-            count += 1
-    return count, first_block, last_block
+            written += 1
+            if count is not None and written >= count:
+                break
+    return written, first_block, last_block
 
 
 def _build_parser():
@@ -201,6 +242,10 @@ def _build_parser():
                         help="Comma-separated execution requests for every record (default: none)")
     parser.add_argument("--fork", default="prague",
                         help="Fork name written to each record for readability (default: prague)")
+    parser.add_argument("--start-block", type=int, default=None,
+                        help="Skip records below this block number (stream-seek; default: from the start)")
+    parser.add_argument("--count", type=int, default=None,
+                        help="Write at most this many records, then stop (default: all)")
     return parser
 
 
@@ -216,6 +261,8 @@ def main(argv=None):
         versioned_hashes=_csv_list(args.versioned_hashes),
         execution_requests=_csv_list(args.execution_requests),
         fork=args.fork,
+        start_block=args.start_block,
+        count=args.count,
     )
 
     log.info("Wrote %d records to %s", count, out_path)

@@ -162,3 +162,21 @@ mock_cl:
     count: null                          # replay at most this many blocks (null = all)
     latency_csv: ""                      # write per-block latency rows here (optional)
     newpayload_version: null             # force engine_newPayload version (e.g. 4 for Prague); null = per-record/auto
+
+# Overlayfs snapshot isolation (src/orchestrator/overlay.py). Only acted on when
+# infrastructure.manage is true: the runner mounts a Linux overlay on top of the
+# pristine snapshot before `compose up` (restoring first, so every run starts
+# clean), repoints the client's DB bind var at the merged dir, and unmounts +
+# wipes scratch on teardown — leaving the snapshot pristine for the next client.
+# Use with a snapshot-backed compose file (e.g. docker-compose.nethermind-mainnet.yml).
+#
+# Requirements: Linux; mount privileges (sudo); scratch_dir on an xattr-capable
+# fs (ext4/xfs) with room for the run's writes. Disabled by default — the
+# configured bind mount / named volume is used unchanged.
+overlay:
+  enabled: false
+  lowerdir: "/mnt/bigdata/snapshot_mainnet_neth/mainnet"  # pristine snapshot (matches NETHERMIND_DB_PATH)
+  scratch_dir: "/mnt/bigdata/overlay/nethermind"          # holds upper/ work/ merged/ (beside lowerdir if omitted)
+  db_path_env: "NETHERMIND_DB_PATH"                        # compose bind var repointed at <scratch_dir>/merged
+  name: "mainnet-overlay"
+  sudo: true
