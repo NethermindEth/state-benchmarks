@@ -11,6 +11,12 @@
 #   - container benchmark_geth         -> cAdvisor queries + runner's du-based DB sizing
 #   - shared benchmark_net network     -> monitoring stack can reach the node
 #
+# Snapshot isolation: when overlay.enabled is set in config_geth.yml,
+# start_infra.sh mounts an overlayfs over the snapshot and exports
+# GETH_DB_PATH=<scratch>/merged, so the bind below points at the overlay and the
+# mock-CL replay's writes never mutate the pristine snapshot. The snapshot is
+# restored before every run. See src/orchestrator/overlay.py.
+#
 # Host paths default to /mnt/bigdata/snapshots; override the GETH_* variables
 # in templates/geth/.env.geth if the host layout differs. The snapshot
 # directory must contain jwt.hex at its root (Geth expects

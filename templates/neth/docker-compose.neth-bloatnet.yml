@@ -20,6 +20,12 @@
 # P2P is fully disabled: the snapshot is the canonical state and the benchmark
 # advances head via the mock-CL engine-API replay, not from network peers.
 #
+# Snapshot isolation: when overlay.enabled is set in config_neth.yml,
+# start_infra.sh mounts an overlayfs over the snapshot and exports
+# NETHERMIND_DB_PATH=<scratch>/merged, so the bind below points at the overlay
+# and the mock-CL replay's writes never mutate the pristine snapshot. The
+# snapshot is restored before every run. See src/orchestrator/overlay.py.
+#
 # Host paths default to the x3.5 snapshot layout; override the NETHERMIND_*
 # variables in templates/neth/.env.neth if the host layout differs. Host ports
 # avoid geth-x35-target (host-net 8545/8551): RPC 8547, engine 8552, metrics 6060.

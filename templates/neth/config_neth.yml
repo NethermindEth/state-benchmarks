@@ -74,7 +74,7 @@ metrics:
     - "net_rx_bytes_per_sec_avg"
 
 load_test:
-  run_time: "5m"
+  run_time: "10m"
   users: 50
   spawn_rate: 10
   wait_time:
@@ -112,3 +112,24 @@ mock_cl:
   payloads: ""
   jwt: ""
   engine_url: "http://localhost:8552"
+
+# Overlayfs snapshot isolation (src/orchestrator/overlay.py). When enabled,
+# start_infra.sh stacks a Linux overlay on top of the pristine snapshot and
+# binds the merged dir into the container instead of the snapshot itself, so the
+# mock-CL replay's new blocks land in scratch (upperdir) and never mutate the
+# snapshot. `start_infra.sh` restores before every run (and on `down`), so each
+# client can be benchmarked from the exact same starting block.
+#
+# Requirements: Linux; mount privileges (sudo); scratch_dir on an xattr-capable
+# fs (ext4/xfs) with room for the run's writes — keep it on the big disk next to
+# the snapshot. Disabled by default: the raw snapshot is bind-mounted as before.
+overlay:
+  enabled: true
+  # Read-only lower layer = the pristine snapshot (matches NETHERMIND_DB_PATH).
+  lowerdir: "/mnt/bigdata/neth-x35-24358000/mainnet"
+  # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
+  scratch_dir: "/mnt/bigdata/overlay/nethermind"
+  # Compose bind var repointed at <scratch_dir>/merged when enabled.
+  db_path_env: "NETHERMIND_DB_PATH"
+  name: "neth-bloatnet"
+  sudo: true

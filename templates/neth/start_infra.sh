@@ -26,8 +26,31 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLIENT="$(basename "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 
+# uv typically lives in ~/.local/bin, which is NOT on PATH in non-login shells
+# (e.g. when this script is driven over SSH/Ansible). The overlay helper below
+# invokes `uv`, so make sure it is findable regardless of how we were launched.
+export PATH="$HOME/.local/bin:$PATH"
+
 ENV_FILE="$SCRIPT_DIR/.env.${CLIENT}"
+# Overlay snapshot isolation reads its config from here (no-op unless overlay.enabled).
+CONFIG="$SCRIPT_DIR/config_${CLIENT}.yml"
 MONITORING_COMPOSE="$SCRIPT_DIR/docker-compose.monitoring.yml"
+
+# Mount a fresh overlay over the pristine snapshot (restores first, so every run
+# starts clean) and repoint the client's DB bind var at the merged dir. No-op
+# when overlay.enabled is false/absent in $CONFIG. Must run before `compose up`.
+overlay_up() {
+  [[ -f "$CONFIG" ]] || return 0
+  PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" uv run python -m orchestrator.overlay up --config "$CONFIG"
+  eval "$(PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" uv run python -m orchestrator.overlay env --config "$CONFIG")"
+}
+
+# Unmount the overlay and wipe scratch, restoring the pristine snapshot. No-op
+# when overlay is disabled.
+overlay_down() {
+  [[ -f "$CONFIG" ]] || return 0
+  PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" uv run python -m orchestrator.overlay down --config "$CONFIG"
+}
 
 # Per-client compose file lives next to this script as
 # docker-compose.<client>-*.yml (e.g. -bloatnet, -mainnet, -sepolia).
@@ -68,6 +91,7 @@ case "${1:-up}" in
     shift || true
     echo "[$CLIENT] tearing down monitoring + client stacks..."
     "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" down "$@"
+    overlay_down
     exit 0
     ;;
   up|"")
@@ -77,6 +101,8 @@ case "${1:-up}" in
     exit 2
     ;;
 esac
+
+overlay_up
 
 echo "[$CLIENT] starting monitoring stack + client..."
 "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" up -d

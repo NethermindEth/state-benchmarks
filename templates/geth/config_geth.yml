@@ -144,3 +144,25 @@ mock_cl:
   # the geth container at /data/jwt.hex) is the default.
   jwt: ""
   engine_url: "http://localhost:8551"
+
+# Overlayfs snapshot isolation (src/orchestrator/overlay.py). When enabled,
+# start_infra.sh stacks a Linux overlay on top of the pristine snapshot and
+# binds the merged dir into the container instead of the snapshot itself, so the
+# mock-CL replay's new blocks land in scratch (upperdir) and never mutate the
+# snapshot. `start_infra.sh` restores before every run (and on `down`), so each
+# client can be benchmarked from the exact same starting block.
+#
+# Geth mounts the snapshot ROOT at /data (chaindata + jwt.hex), so lowerdir is
+# the whole GETH_DB_PATH directory. Requirements: Linux; mount privileges
+# (sudo); scratch_dir on an xattr-capable fs (ext4/xfs) on the big disk with
+# room for the run's writes. Disabled by default (raw snapshot bind-mounted).
+overlay:
+  enabled: false
+  # Read-only lower layer = the pristine snapshot dir (matches GETH_DB_PATH).
+  lowerdir: "/mnt/bigdata/snapshots"
+  # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
+  scratch_dir: "/mnt/bigdata/overlay/geth"
+  # Compose bind var repointed at <scratch_dir>/merged when enabled.
+  db_path_env: "GETH_DB_PATH"
+  name: "geth-bloatnet"
+  sudo: true
