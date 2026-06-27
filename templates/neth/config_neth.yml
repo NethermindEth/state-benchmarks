@@ -89,9 +89,14 @@ load_test:
     eth_getProof: 1
     eth_sendTransaction: 1
   latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
-  recent_block_window: 1000
+  # Cross-client standard (matches templates/geth): 64 sits inside every
+  # client's served recent-state window — geth pathdb serves only the last ~128
+  # blocks, the binding constraint. (Nethermind itself serves far more via
+  # FlatDb.MinReorgDepth=1024, but we standardize for apples-to-apples.) 5s
+  # refresh keeps pinned blocks fresh as the replay advances the head.
+  recent_block_window: 64
   min_pinned_window: 8
-  block_window_refresh_sec: 30
+  block_window_refresh_sec: 5
   addresses:
     - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
     - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"

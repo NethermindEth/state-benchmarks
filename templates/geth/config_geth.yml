@@ -20,7 +20,9 @@ infrastructure:
     clients: "templates/geth/docker-compose.geth-bloatnet.yml"
 
 nodes:
-  rpc_url: "http://localhost:8547"
+  # Geth RPC host port (matches CLIENT_RPC_PORT in .env.geth; 8549 avoids the
+  # host-net geth-x35-target on 8545).
+  rpc_url: "http://localhost:8549"
   consensus: false
   # The orchestrator's built-in mock-CL auto-start is pivot-only (snap-sync
   # from empty). The bloatnet snapshot is already at head, so we want REPLAY,
@@ -114,9 +116,13 @@ load_test:
     eth_getProof: 1
     eth_sendTransaction: 1
   latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
-  recent_block_window: 1000
+  # Cross-client standard: 64 sits inside every client's served recent-state
+  # window (geth pathdb serves only the last ~128 blocks; not configurable like
+  # Nethermind's FlatDb.MinReorgDepth). 5s refresh keeps pinned blocks fresh as
+  # the replay advances the head, so they never age out of the served window.
+  recent_block_window: 64
   min_pinned_window: 8
-  block_window_refresh_sec: 30
+  block_window_refresh_sec: 5
   addresses:
     - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
     - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
@@ -157,9 +163,10 @@ mock_cl:
 # (sudo); scratch_dir on an xattr-capable fs (ext4/xfs) on the big disk with
 # room for the run's writes. Disabled by default (raw snapshot bind-mounted).
 overlay:
-  enabled: false
-  # Read-only lower layer = the pristine snapshot dir (matches GETH_DB_PATH).
-  lowerdir: "/mnt/bigdata/snapshots"
+  enabled: true
+  # Read-only lower layer = the pristine snapshot datadir (matches GETH_DB_PATH;
+  # contains geth/ + jwt.hex). perf-devnet-3 geth @ block 24358000.
+  lowerdir: "/mnt/bigdata/geth-x35-24358000-snap"
   # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
   scratch_dir: "/mnt/bigdata/overlay/geth"
   # Compose bind var repointed at <scratch_dir>/merged when enabled.
