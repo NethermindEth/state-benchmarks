@@ -134,6 +134,15 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         </Detail>
       </Card>
 
+      <Card title="eth_getProof witness size vs account count">
+        <p class="text-sm text-ink-400 mb-4">The EOA account proof p50 against the exact state size — toggle the x-axis between account count and account-trie bytes. Dashed line = fitted theoretical model, extended past the measured range.</p>
+        <SummaryStatsChart client:visible data={stats.proofSize} />
+        <Detail summary="is it linear? — theory & extrapolation">
+          <p>Not linear — <strong class="text-ink-100">logarithmic</strong>, the direct consequence of the depth law. An account proof carries one node per trie level, and depth ≈ log₁₆(N), so proof bytes track <span class="font-mono text-ink-100">size ≈ 362 B + 484·log₁₆(N)</span> — <span class="font-mono">R² 0.995</span>, versus <span class="font-mono">R² 0.97</span> for a straight line. The slope <strong class="text-ink-100">~484 B per trie level</strong> is one branch node's worth of sibling hashes (≈15 × 32 B + overhead) — so the same +0.48-level depth offset that the account-depth chart measures shows up here as the +11% proof growth over the whole 1× → 10× range.</p>
+          <p>Because it grows with <em>log</em> of account count, the witness stays bounded far beyond the measured range: a <span class="font-mono">20×</span> state reaches only <strong class="text-ink-100">~4.35 KB</strong>, <span class="font-mono">50×</span> ~4.5 KB, and a <span class="font-mono">100×</span> state (~39B accounts) just <strong class="text-ink-100">~4.6 KB</strong> — about +21% over mainnet's 3.82 KB across a hundred-fold state increase. This is the EIP-1186 / statelessness headline: per-proof witness is not the scaling bottleneck.</p>
+        </Detail>
+      </Card>
+
       <Card title="Snap sync — Nethermind vs Geth">
         <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). NM→NM is measured through the headline 10× (27 h 24 m); NM→Geth through 5×. 7× and the 10× Geth pairs are pending.</p>
         <ClientComparisonChart client:visible data={snap.wallTime} clients={snap.clients} unit="h" pendingMults={snap.pendingMults} theory={snap.model.points} theoryLabel={snap.model.label} />
