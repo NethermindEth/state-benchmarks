@@ -3,7 +3,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import Section from '../components/Section.astro';
 import Card from '../components/ui/Card.astro';
 import Stat from '../components/ui/Stat.astro';
-import Placeholder from '../components/ui/Placeholder.astro';
 import Detail from '../components/ui/Detail.astro';
 import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
 import CompositionChart from '../components/charts/CompositionChart.tsx';
@@ -11,6 +10,7 @@ import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx'
 import ClientComparisonChart from '../components/charts/ClientComparisonChart.tsx';
 import TrieDepthChart from '../components/charts/TrieDepthChart.tsx';
 import SlotHistogramChart from '../components/charts/SlotHistogramChart.tsx';
+import RpcLatencyChart from '../components/charts/RpcLatencyChart.tsx';
 import ScalingContrast from '../components/charts/ScalingContrast.tsx';
 import ChartTakeaways from '../components/charts/ChartTakeaways.tsx';
 import SummaryStatsChart from '../components/charts/SummaryStatsChart.tsx';
@@ -178,13 +178,47 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         </div>
       </Card>
 
-      <Card title="Per-block execution & RPC latency">
-        <div class="flex flex-wrap gap-2 mb-5">
-          {clients.clients.map((c) => (
-            <span class="rounded-full border border-ink-700 px-3 py-1 text-sm font-mono text-ink-300">{c}</span>
-          ))}
+      <Card title="Cross-client read latency — Geth vs Nethermind">
+        <p class="text-sm text-ink-400 mb-4">JSON-RPC <strong class="text-ink-100">p99 latency</strong> per method under 50 concurrent readers at the {clients.milestone} state, 5-min duration-matched (log scale, lower is better). Geth's read tail is ~10× tighter across every method.</p>
+        <RpcLatencyChart client:visible data={clients.rpcP99} clients={clients.clients} unit="ms" />
+        <ChartTakeaways client:visible items={[
+          { to: 27, suffix: ' ms', label: `Geth aggregate p99 (Nethermind ${clients.rpcAggregate.nethP99} ms)`, color: '#ff9900', bar: 0.1 },
+          { to: 10, prefix: '~', suffix: '×', label: 'Geth read-latency tail advantage', color: '#00b3ff', bar: 1 },
+          { text: '0 / 0', label: 'RPC failures — both clients, ~48k requests each', color: '#34d399' },
+        ]} />
+
+        <p class="text-sm text-ink-400 mt-8 mb-3">Execution & resource cost over the same run — opposite optima:</p>
+        <div class="overflow-x-auto rounded-xl border border-ink-800">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-ink-900 text-ink-300 text-left">
+                <th class="px-3 py-2 font-medium">Metric</th>
+                <th class="px-3 py-2 font-medium text-right">Geth</th>
+                <th class="px-3 py-2 font-medium text-right">Nethermind</th>
+                <th class="px-3 py-2 font-medium text-center">Leaner</th>
+              </tr>
+            </thead>
+            <tbody class="text-ink-200">
+              {clients.execution.map((r) => (
+                <tr class="border-t border-ink-800">
+                  <td class="px-3 py-2">{r.metric}</td>
+                  <td class:list={['px-3 py-2 text-right tabular-nums font-mono', r.winner === 'geth' ? 'text-white' : 'text-ink-300']}>{r.geth}</td>
+                  <td class:list={['px-3 py-2 text-right tabular-nums font-mono', r.winner === 'nethermind' ? 'text-white' : 'text-ink-300']}>{r.nethermind}</td>
+                  <td class="px-3 py-2 text-center">
+                    <span class:list={['text-xs font-mono px-2 py-0.5 rounded', r.winner === 'geth' ? 'bg-accent-500/15 text-accent-300' : 'bg-signal-good/15 text-signal-good']}>{r.winner === 'geth' ? 'Geth' : 'NM'}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <Placeholder title="Execution-time & RPC-latency benchmarks not collected yet" note={clients.note} />
+
+        <Detail summary="what the cross-client benchmark shows">
+          <p>{clients.summary}</p>
+          <p>{clients.proofParity}</p>
+          <p class="text-xs text-ink-500">{clients.caveat}</p>
+        </Detail>
+        <p class="text-xs text-ink-500 mt-3">{clients.window}</p>
       </Card>
     </div>
 

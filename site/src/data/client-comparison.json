@@ -1,6 +1,35 @@
 {
-  "clients": ["nethermind", "geth", "besu", "reth", "erigon"],
-  "measured": false,
-  "series": [],
-  "note": "No cross-client benchmark data collected yet. The benchmark battery (issue #21) runs sync, execution-under-head, and JSON-RPC latency on Nethermind, Geth, Besu, Reth, and Erigon at each milestone; results land in benchmarks/<milestone>/ as they're produced."
+  "clients": ["geth", "nethermind"],
+  "measured": true,
+  "milestone": "3.5×",
+  "window": "5-min duration-matched runs at the 3.5× bloatnet (perf-devnet-3, head 24,358,000), under live head + 50 concurrent Locust read clients. Snapshot isolated via overlayfs; head driven by a mock CL replaying blocks 24,358,001+. 0 RPC failures on either client.",
+  "rpcP99": [
+    { "method": "eth_getBalance",   "geth": 25, "nethermind": 280 },
+    { "method": "eth_getStorageAt", "geth": 29, "nethermind": 260 },
+    { "method": "eth_call",         "geth": 25, "nethermind": 250 },
+    { "method": "eth_getCode",      "geth": 25, "nethermind": 280 },
+    { "method": "eth_getProof",     "geth": 32, "nethermind": 320 }
+  ],
+  "rpcTable": [
+    { "method": "eth_getBalance",   "gethP50": 0, "gethP95": 3, "gethP99": 25, "gethMean": 1.52, "nethP50": 0, "nethP95": 5, "nethP99": 280, "nethMean": 10.30 },
+    { "method": "eth_getStorageAt", "gethP50": 0, "gethP95": 3, "gethP99": 29, "gethMean": 1.61, "nethP50": 0, "nethP95": 5, "nethP99": 260, "nethMean": 10.09 },
+    { "method": "eth_call",         "gethP50": 0, "gethP95": 3, "gethP99": 25, "gethMean": 1.58, "nethP50": 1, "nethP95": 6, "nethP99": 250, "nethMean": 10.29 },
+    { "method": "eth_getCode",      "gethP50": 0, "gethP95": 3, "gethP99": 25, "gethMean": 1.71, "nethP50": 0, "nethP95": 6, "nethP99": 280, "nethMean": 9.77 },
+    { "method": "eth_getProof",     "gethP50": 1, "gethP95": 4, "gethP99": 32, "gethMean": 2.09, "nethP50": 1, "nethP95": 9, "nethP99": 320, "nethMean": 11.90 }
+  ],
+  "rpcAggregate": { "gethReq": 49135, "nethReq": 47782, "gethRps": 164, "nethRps": 160, "gethP99": 27, "gethMean": 1.64, "nethP99": 270, "nethMean": 10.29 },
+  "execution": [
+    { "metric": "Gas/s — average",       "geth": "684 Mgas/s",   "nethermind": "1,186 Mgas/s", "winner": "nethermind" },
+    { "metric": "Gas/s — peak",          "geth": "1,535 Mgas/s", "nethermind": "3,981 Mgas/s", "winner": "nethermind" },
+    { "metric": "Block processing time", "geth": "~2.43 s",      "nethermind": "~2.09 s",      "winner": "nethermind" },
+    { "metric": "Peak RSS",              "geth": "12.2 GB",      "nethermind": "42.9 GB",      "winner": "geth" },
+    { "metric": "Sustained RSS",         "geth": "9.4 GB",       "nethermind": "29.4 GB",      "winner": "geth" },
+    { "metric": "Disk IOPS — peak",      "geth": "38,826",       "nethermind": "48,565",       "winner": "geth" },
+    { "metric": "Disk throughput — peak","geth": "409 MB/s",     "nethermind": "1,438 MB/s",   "winner": "geth" },
+    { "metric": "Final DB size",         "geth": "2.34 TB",      "nethermind": "1.81 TB",      "winner": "nethermind" }
+  ],
+  "proofParity": "eth_getProof byte sizes are near-identical across clients — p50 8,072 B (Geth) vs 8,071 B (NM), p95/p99 13,896 vs 13,895 B — exactly as expected for the same state root. EIP-1186 proofs are client-agnostic, so the witness-size metric is comparable regardless of which client serves it.",
+  "summary": "Matched at 5 minutes against the same 3.5× state and read load, the two clients land at opposite optima. Geth wins read-serving decisively: aggregate p99 27 ms vs 270 ms (~10×), mean 1.6 ms vs 10.3 ms, with a tight tail uniform across all five methods — and it does it on ~12 GB peak RSS vs Nethermind's ~43 GB (~3.5×). Nethermind wins execution: ~1,186 vs 684 Mgas/s average (~1.7×) and slightly faster per-block processing, plus a smaller on-disk DB (1.81 vs 2.34 TB) — but it pays for the throughput in disk I/O (1,438 vs 409 MB/s peak) and memory. Net: Geth optimizes for cheap, low-latency state reads with a small footprint; Nethermind trades memory + disk I/O for higher execution throughput.",
+  "caveat": "Block-processing time and gas/s are NOT a like-for-like statistic — Geth reports a go-metrics summary (chain_execution / chain_mgasps) while Nethermind reports gauges (last_block_processing_time / mgas_per_sec) pulled from Prometheus; treat the execution-throughput row as indicative, not a head-to-head. The read window (recent_block_window=64) sits inside both clients' served-state window, so latency is fair — but it does not exercise Nethermind's deeper-history advantage (FlatDb MinReorgDepth=1024 vs Geth pathdb's fixed ~128-block window). Single milestone (3.5×); other milestones and clients (Besu/Reth/Erigon) pending per issue #21.",
+  "note": "Cross-client read + execution battery from issue #21. Besu / Reth / Erigon and other milestones land in benchmarks/<milestone>/ as produced."
 }
