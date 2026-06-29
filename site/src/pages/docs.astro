@@ -115,6 +115,9 @@ bin/orchestrator run \\
   --db          /mnt/nm/flat \\
   --code-db     /mnt/nm/code \\
   --snapshot-dir /var/lib/sidecar \\
+  --spill-dir   /mnt/scratch/spill          # IMPORTANT: the bootstrap slot-spill defaults to the
+                                            # container root (/tmp); on big states that ENOSPC-wedges.
+                                            # Point it at roomy disk (or set TMPDIR). ~400 GB at 10x.
   --dedup-dir   /mnt/scratch/codehash-dedup   # roomy: ~700 GB at 10x`}</code></pre>
 
     <table>
@@ -139,6 +142,22 @@ bin/orchestrator run \\
     <pre><code>{`curl -s localhost:9001 -H content-type:application/json \\
   --data '{"jsonrpc":"2.0","id":1,"method":"statecomp_get"}' | jq .result`}</code></pre>
 
+    <h3>Offline structural scan — <code>statescan</code></h3>
+    <p>
+      <code>orchestrator/cmd/statescan</code> is the exact, offline counterpart to the live sidecar: a
+      structural <strong>root→leaf walk</strong> of a frozen FlatDb (opened read-only as a RocksDB
+      secondary, never writes the source). It classifies every trie node at its <strong>true structural
+      depth</strong> (branch+extension edges from the root) and reports the account + storage
+      node-type/depth tables and the <strong>per-contract</strong> storage count — the FlatDb keys storage
+      by account, so each contract's trie is walked individually (clones sharing a storage root are
+      <em>not</em> deduplicated). This is the source of the <a href="https://github.com/NethermindEth/state-benchmarks/issues/29" target="_blank" rel="noreferrer noopener">#29</a>/<a href="https://github.com/NethermindEth/state-benchmarks/issues/35" target="_blank" rel="noreferrer noopener">#35</a> state-structure numbers and the trie-depth charts.
+    </p>
+    <pre><code>{`# walk a frozen NM FlatDb (just the mainnet/flat RocksDB; TMPDIR must be on roomy disk)
+STATESCAN_PARALLEL=12 STATESCAN_BLOCK_CACHE_MIB=8192 \\
+  statescan /mnt/nm/mainnet/flat
+# -> ACCOUNT/STORAGE node-type + depth tables, contracts-with-storage count
+# STATESCAN_ACCOUNT_ONLY=1 skips the (long) storage walk`}</code></pre>
+
     <hr />
 
     <h2>3 · Cross-EL replay</h2>
@@ -159,14 +178,17 @@ bin/orchestrator run \\
     <h3>Replay onto another client</h3>
     <pre><code>{`# 1. boot the target EL on the matching genesis (verify genesis_sha256), JWT on Engine API
 
-# 2. heal block-number gaps from partial-acceptance skips
-heal-payloads heal \\
-  --in  payloads.rlp --out payloads.healed.rlp \\
-  --nm-rpc <source-NM-engine-api> --jwt-path jwt.hex --include-tail
+# 2. rebuild a canonical, contiguous, hash-linked payloads file. 'cohere' refetches
+#    each canonical block from the source NM (debug_getRawBlock) -- needed because raw
+#    run payloads carry zeroed logsBloom and won't replay as-is; pass an empty --in to
+#    fetch the whole range. ('heal' is the lighter variant: only fills block-number gaps.)
+heal-payloads cohere \\
+  --in payloads.rlp --out payloads.cohered.rlp \\
+  --rpc-url http://<source-nm>:8545 --from <firstBlock> --head <lastBlock>
 
 # 3. replay + verify the final state root
 bin/orchestrator replay \\
-  --payloads payloads.healed.rlp \\
+  --payloads payloads.cohered.rlp \\
   --manifest run-manifest.json \\
   --rpc-url  http://<target-el>:8551 \\
   --jwt-path jwt.hex`}</code></pre>
@@ -188,23 +210,59 @@ bin/orchestrator replay \\
     <p>
       Milestone states are <strong>frozen</strong> snapshots with no live chain, so a stock node can't
       snap-sync from them. Runs use an <strong>isolated single-peer</strong> network (frozen source →
-      target over devp2p) with the head set by one manual <code>engine_forkchoiceUpdatedV3</code> — no
-      consensus client.
+      target over devp2p) driven by a <strong>repeating fake-CL <code>engine_forkchoiceUpdatedV3</code>
+      loop</strong> (~every 12 s) — there is no consensus client.
     </p>
     <ul>
-      <li><strong>Nethermind target</strong> — additive opt-in flag <code>Sync.StaticSnapPivot</code> (<a href="https://github.com/NethermindEth/nethermind/pull/11943" target="_blank" rel="noreferrer noopener">nethermind#11943</a>) targets a fixed pivot served by a peer sitting <em>at</em> that pivot, reconstructing <code>stateRoot(H)</code> bit-for-bit.</li>
-      <li><strong>Geth target</strong> — no client change; it picks its own pivot and heals, driven by a minimal fake-CL forkchoice pinned at the source head.</li>
+      <li><strong>Nethermind target</strong> — a fixed pivot pinned at (or just below) the source head, served by a peer sitting <em>at</em> that pivot, reconstructing <code>stateRoot(H)</code> bit-for-bit (cf. <a href="https://github.com/NethermindEth/nethermind/pull/11943" target="_blank" rel="noreferrer noopener">nethermind#11943</a>). The pivot is set via <code>Sync.PivotHash/PivotNumber/PivotTotalDifficulty</code>; the FCU's <strong>finalized</strong> block becomes the snap pivot, so a <strong>tiny head↔finalized split</strong> (<code>head=H</code>, <code>finalized=H−16</code>) is required or NM can't resolve the pivot header and never starts the state walk.</li>
+      <li><strong>Geth target</strong> — no client change; it picks its own pivot and heals, driven by the same fake-CL forkchoice loop pinned at the source head.</li>
     </ul>
-    <pre><code>{`# source: frozen NM serving snap
-nethermind --Sync.SnapServingEnabled=true --FlatDb.Enabled=true   # no CL
+    <pre><code>{`# source: frozen NM serving snap (no CL). Discovery MUST be on -- NetworkingEnabled
+# alone never starts the RLPx server -- and the inbound-IP throttle MUST be off or
+# the source rejects the target after a few handshakes (-> 0 peers, persisted in
+# peers/SimpleFileDb.db). Serves the pivot within Sync.SnapServingMaxDepth (=128) of head.
+nethermind --Init.DiscoveryEnabled=true --Sync.NetworkingEnabled=true \\
+  --FlatDb.Enabled=true --Pruning.Mode=None \\
+  --Network.FilterPeersByRecentIp=false --Network.FilterPeersBySameSubnet=false
 
 # NM target
-nethermind --Sync.SnapSync=true --Sync.StaticSnapPivot=true \\
-  --Sync.PivotNumber=<H> --Sync.PivotHash=<hash(H)>`}</code></pre>
+nethermind --Sync.SnapSync=true --Init.DiscoveryEnabled=true \\
+  --Sync.PivotNumber=<H> --Sync.PivotHash=<hash(H)> --Sync.PivotTotalDifficulty=<td> \\
+  --Network.StaticPeers=<source-enode> --Network.OnlyStaticPeers=true \\
+  --Network.FilterPeersByRecentIp=false --Network.FilterPeersBySameSubnet=false
+
+# then drive the snap (fake CL), repeating every ~12s:
+#   engine_forkchoiceUpdatedV3({headBlockHash: H, safeBlockHash: H-16, finalizedBlockHash: H-16})`}</code></pre>
+    <Callout type="note" title="Flag caveat">
+      Flags track the <code>wip-v22-staticpivot</code> Nethermind build used for the x10 run (see
+      <a href="https://github.com/NethermindEth/state-benchmarks/issues/18" target="_blank" rel="noreferrer noopener">#18</a>):
+      the static pivot is set through <code>Sync.PivotHash/PivotNumber/PivotTotalDifficulty</code> and snap
+      serving via the default <code>Sync.SnapServingMaxDepth=128</code> — there was no separate
+      <code>Sync.StaticSnapPivot</code> / <code>Sync.SnapServingEnabled</code> flag in that image. The
+      peer-filter and discovery flags above are <em>required</em>, not optional.
+    </Callout>
     <Callout type="note" title="Reading the numbers">
       DB size and peak RSS are topology-independent. Wall time and bandwidth come from a single
       dedicated LAN peer — read them as <em>relative scaling across state sizes</em>, not real-world
       multi-peer sync time. Measured results are on the <a href="/results">Results</a> page.
+    </Callout>
+
+    <hr />
+
+    <h2>5 · RPC load benchmarking &amp; mock-CL driver</h2>
+    <p>
+      A separate Python framework (<a href="https://github.com/NethermindEth/state-benchmarks/pull/34" target="_blank" rel="noreferrer noopener">state-benchmarks#34</a>) covers the two things the Go stack doesn't: <strong>Locust</strong>-driven RPC load tests against a milestone node, and a standalone <strong>mock consensus layer</strong> — the Engine-API driver that the snap-sync and replay runs need on a CL-less network.
+    </p>
+    <ul>
+      <li><strong>Locust load tests</strong> (<code>src/load_tests/locustfile.py</code>) — hammer a node with <code>eth_getBalance</code> / <code>eth_getStorageAt</code> / <code>eth_call</code> / <code>eth_getProof</code> and aggregate latency percentiles (<code>src/metrics/aggregator.py</code>).</li>
+      <li><strong>Mock CL</strong> (<code>src/mock_cl/</code>) — a JWT-authed Engine-API client with two drivers: <code>PivotDriver</code> repeatedly forkchoice-updates an EL to a frozen pivot so it snap-syncs (the §4 fake-CL loop), and <code>ReplayDriver</code> feeds recorded <code>ExecutionPayload</code>s through <code>engine_newPayloadV1</code>–<code>V4</code> + <code>engine_forkchoiceUpdatedV1</code>–<code>V3</code> and measures per-block latency.</li>
+    </ul>
+    <Callout type="note" title="Driving our synthetic blocks">
+      The bloat blocks are non-blob and were produced with a <strong>zero</strong> <code>parentBeaconBlockRoot</code>.
+      Replaying them needs <code>engine_newPayloadV4</code> with empty <code>versionedHashes</code>, a zero
+      <code>parentBeaconBlockRoot</code>, and empty <code>executionRequests</code> — those are out-of-band
+      <code>newPayload</code> args, not stored in the payload, so a converter must stamp them in. (Below the
+      bloat-start height, real-mainnet blocks carry non-zero beacon roots — use each header's actual value.)
     </Callout>
 
     <hr />

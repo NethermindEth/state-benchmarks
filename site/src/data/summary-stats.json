@@ -65,10 +65,12 @@
       { "key": "bytes", "label": "by trie size", "axisName": "account-trie size", "kind": "gb", "values": [60.4, 61.9, 304.0, 422.8, 606.2] }
     ],
     "series": [
-      { "label": "EOA account proof p50", "color": "#00b3ff", "values": [3820, 3822, 4083, 4159, 4241] }
+      { "label": "account p50", "color": "#00b3ff", "values": [3820, 3822, 4083, 4159, 4241] },
+      { "label": "account p95", "color": "#4fc9ff", "values": [3929, 3942, 4224, 4289, 4358] },
+      { "label": "account + 1 slot p50", "color": "#ff9900", "values": [4975, 5091, 5364, 5429, 5486] }
     ],
     "theory": {
-      "label": "log₁₆ model",
+      "label": "log₁₆ model (account p50)",
       "formula": "proof ≈ 362 B + 484 · log₁₆(N)",
       "fit": "+484 B per trie level · R² 0.995 (a linear fit reaches only 0.97)",
       "points": {

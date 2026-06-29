@@ -6,7 +6,6 @@ import Stat from '../components/ui/Stat.astro';
 import Detail from '../components/ui/Detail.astro';
 import StateGrowthChart from '../components/charts/StateGrowthChart.tsx';
 import CompositionChart from '../components/charts/CompositionChart.tsx';
-import ProofComparisonChart from '../components/charts/ProofComparisonChart.tsx';
 import ClientComparisonChart from '../components/charts/ClientComparisonChart.tsx';
 import TrieDepthChart from '../components/charts/TrieDepthChart.tsx';
 import SlotHistogramChart from '../components/charts/SlotHistogramChart.tsx';
@@ -117,29 +116,14 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
 
-      <Card title="eth_getProof witness size">
-        <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set in every state — bars are directly comparable. Dashed line = the log₁₆ model.</p>
-        <ProofComparisonChart
-          client:visible
-          data={proofs.series}
-          pendingMults={proofs.pendingMults}
-          theory={[{ mult: 1, y: 3820 }, { mult: 3.5, y: 3825 }, { mult: 5, y: 4083 }, { mult: 7, y: 4136 }, { mult: 10, y: 4192 }]}
-          notes={[{ coord: ['10×', 4241], text: '+11% vs mainnet\nmaxDepth 8→9', color: '#00b3ff' }]}
-          baseline={{ y: 3820, text: 'mainnet 3,820 B' }}
-        />
-        <Detail summary="what this means for statelessness">
-          <p>Proof size tracks log₁₆ of <em>account count</em>, not the raw multiplier — which is why 3.5× (392M accounts, barely above mainnet) measures the same as mainnet, while the rebloated 5× (1.99B accounts) sits one log-step higher. {proofs.finding}</p>
-          <p>A block's witness ≈ <strong class="text-ink-100">(state accesses) × (per-access witness)</strong>. The per-access term is log-bounded, so the lever that moves a block's witness budget is the <em>number of accesses</em> (and gas repricing), not individual proof size — the pre-Verkle MPT baseline a binary tree (<a href="https://eips.ethereum.org/EIPS/eip-7864" target="_blank" rel="noreferrer noopener" class="text-accent-400 hover:text-accent-300">EIP-7864</a>) is measured against.</p>
-          <p class="text-xs text-ink-500">Caveat: per-proof <code>nodeLookups</code> <em>drops</em> on the bloatnets (EOA p50 112 → 72) — a flat-DB residency artifact (freshly-written state is densely packed; mainnet is fragmented by years of compaction), not a real cost reduction. Witness <em>bytes</em> are client-agnostic — EIP-1186 proofs are byte-identical across clients for the same state root — and stay the comparable size metric.</p>
-        </Detail>
-      </Card>
-
       <Card title="eth_getProof witness size vs account count">
-        <p class="text-sm text-ink-400 mb-4">The EOA account proof p50 against the exact state size — toggle the x-axis between account count and account-trie bytes. Dashed line = fitted theoretical model, extended past the measured range.</p>
+        <p class="text-sm text-ink-400 mb-4">The same fixed 742-address set in every state, plotted against the exact account count — toggle the x-axis between account count and account-trie size. Dashed line = fitted log₁₆ model for the account p50, extended past the measured range.</p>
         <SummaryStatsChart client:visible data={stats.proofSize} />
         <Detail summary="is it linear? — theory & extrapolation">
-          <p>Not linear — <strong class="text-ink-100">logarithmic</strong>, the direct consequence of the depth law. An account proof carries one node per trie level, and depth ≈ log₁₆(N), so proof bytes track <span class="font-mono text-ink-100">size ≈ 362 B + 484·log₁₆(N)</span> — <span class="font-mono">R² 0.995</span>, versus <span class="font-mono">R² 0.97</span> for a straight line. The slope <strong class="text-ink-100">~484 B per trie level</strong> is one branch node's worth of sibling hashes (≈15 × 32 B + overhead) — so the same +0.48-level depth offset that the account-depth chart measures shows up here as the +11% proof growth over the whole 1× → 10× range.</p>
-          <p>Because it grows with <em>log</em> of account count, the witness stays bounded far beyond the measured range: a <span class="font-mono">20×</span> state reaches only <strong class="text-ink-100">~4.35 KB</strong>, <span class="font-mono">50×</span> ~4.5 KB, and a <span class="font-mono">100×</span> state (~39B accounts) just <strong class="text-ink-100">~4.6 KB</strong> — about +21% over mainnet's 3.82 KB across a hundred-fold state increase. This is the EIP-1186 / statelessness headline: per-proof witness is not the scaling bottleneck.</p>
+          <p>Not linear — <strong class="text-ink-100">logarithmic</strong>, the direct consequence of the depth law, which is also why the witness tracks account <em>count</em> rather than the raw multiplier (3.5× has only 392M accounts, barely above mainnet, so it measures the same; the rebloated 5× at 1.99B accounts sits one log-step higher). An account proof carries one node per trie level and depth ≈ log₁₆(N), so proof bytes track <span class="font-mono text-ink-100">size ≈ 362 B + 484·log₁₆(N)</span> — <span class="font-mono">R² 0.995</span>, versus <span class="font-mono">R² 0.97</span> for a straight line. The slope <strong class="text-ink-100">~484 B per trie level</strong> is one branch node's worth of sibling hashes (≈15 × 32 B + overhead) — so the same +0.48-level depth offset the account-depth chart measures shows up here as the +11% proof growth over the whole 1× → 10× range.</p>
+          <p>Because it grows with <em>log</em> of account count, the witness stays bounded far beyond the measured range: a <span class="font-mono">20×</span> state reaches only <strong class="text-ink-100">~4.35 KB</strong>, <span class="font-mono">50×</span> ~4.5 KB, and a <span class="font-mono">100×</span> state (~39B accounts) just <strong class="text-ink-100">~4.6 KB</strong> — about +21% over mainnet's 3.82 KB across a hundred-fold state increase. {proofs.finding}</p>
+          <p>A block's witness ≈ <strong class="text-ink-100">(state accesses) × (per-access witness)</strong>. The per-access term is log-bounded, so the lever that moves a block's witness budget is the <em>number of accesses</em> (and gas repricing), not individual proof size — the pre-Verkle MPT baseline a binary tree (<a href="https://eips.ethereum.org/EIPS/eip-7864" target="_blank" rel="noreferrer noopener" class="text-accent-400 hover:text-accent-300">EIP-7864</a>) is measured against.</p>
+          <p class="text-xs text-ink-500">Caveat: per-proof <code>nodeLookups</code> <em>drops</em> on the bloatnets (EOA p50 112 → 72) — a flat-DB residency artifact (freshly-written state is densely packed; mainnet is fragmented by years of compaction), not a real cost reduction. Witness <em>bytes</em> are client-agnostic — EIP-1186 proofs are byte-identical across clients for the same state root — and stay the comparable size metric.</p>
         </Detail>
       </Card>
 

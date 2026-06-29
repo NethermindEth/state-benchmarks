@@ -96,7 +96,9 @@ decoder tolerates the non-canonical `long` encodings C# RLP emits.
 | Closed-loop controller, verbs  | `orchestrator/internal/controller`, `orchestrator/internal/verbs` (Go)   |
 | Diff emission                  | Nethermind `StateDiffsWriter` plugin ([#11788](https://github.com/NethermindEth/nethermind/pull/11788)) |
 | State-composition tracker      | `orchestrator/cmd/sidecar` — RocksDB secondary ([#77](https://github.com/NethermindEth/eth-perf-research/pull/77)) |
-| Cross-EL replay + gap healing  | `orchestrator/cmd/orchestrator replay`, `orchestrator/cmd/heal-payloads` |
+| Offline structural state scan  | `orchestrator/cmd/statescan` — root→leaf FlatDb walk, per-contract node-types/depth (feeds [#29](https://github.com/NethermindEth/state-benchmarks/issues/29)/[#35](https://github.com/NethermindEth/state-benchmarks/issues/35)) |
+| Cross-EL replay + payload cohere | `orchestrator/cmd/orchestrator replay`, `orchestrator/cmd/heal-payloads` (`cohere`/`heal`) |
+| RPC load tests + mock CL        | `state-benchmarks` Locust framework + Engine-API mock-CL driver ([#34](https://github.com/NethermindEth/state-benchmarks/pull/34)) |
 | Run artifacts                  | `journal.bin`, `payloads.rlp`, `run-manifest.json`                       |
 | Reports                        | this site, `/results`                                                    |
 

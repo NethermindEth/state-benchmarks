@@ -64,7 +64,7 @@ export default function SummaryStatsChart({ data }: Props) {
         name: s.label, type: 'line' as const, smooth: false, symbol: 'circle', symbolSize: 9,
         lineStyle: { width: 2.5, color: s.color }, itemStyle: { color: s.color },
         emphasis: { focus: 'series' as const },
-        label: { show: true, position: 'top' as const, color: BRAND.text, fontSize: 10, formatter: (p: { value: [number, number] }) => yFmt(p.value?.[1]) },
+        label: { show: data.series.length === 1, position: 'top' as const, color: BRAND.text, fontSize: 10, formatter: (p: { value: [number, number] }) => yFmt(p.value?.[1]) },
         z: 2,
         data: s.values.map((y, i) => [xMode.values[i], y]),
       })).concat(theorySerie),
