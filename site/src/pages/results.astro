@@ -77,8 +77,12 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Account-trie depth vs account size">
-        <p class="text-sm text-ink-400 mb-4">The leaf-weighted average account-trie depth against the exact state size — toggle the x-axis between count and bytes.</p>
+        <p class="text-sm text-ink-400 mb-4">The leaf-weighted average account-trie depth against the exact state size — toggle the x-axis between count and bytes. The dashed line is the fitted theoretical model, extended past the measured range.</p>
         <SummaryStatsChart client:visible data={stats.accountDepth} />
+        <Detail summary="is it linear? — theory & extrapolation">
+          <p>Not linear — <strong class="text-ink-100">logarithmic</strong>. A uniformly-filled 16-way (hexary) trie of <span class="font-mono">N</span> leaves has expected depth ≈ <span class="font-mono">log₁₆(N)</span>. Fitting the five measured points gives <span class="font-mono text-ink-100">depth = 0.99·log₁₆(N) + 0.52</span> — slope <strong class="text-ink-100">1.00</strong> in log₁₆-space, a constant <strong class="text-ink-100">+0.48</strong> offset, and <span class="font-mono">R² = 0.99998</span>. A straight line fits far worse (<span class="font-mono">R² = 0.94</span>) and would over-predict at the top end.</p>
+          <p>Because depth grows with the <em>logarithm</em> of account count, the extrapolation is almost flat: a <span class="font-mono">20×</span> state (~7.9B accounts) reaches only <strong class="text-ink-100">~8.7</strong> levels, <span class="font-mono">50×</span> ~9.0, and a <span class="font-mono">100×</span> state (~39B accounts) still only <strong class="text-ink-100">~9.3</strong> levels — under one extra level over the entire 10×→100× climb. This is the structural reason witness sizes stay bounded.</p>
+        </Detail>
       </Card>
 
       <Card title="Storage-trie depth across milestones">
@@ -94,8 +98,12 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Storage-trie depth vs storage size">
-        <p class="text-sm text-ink-400 mb-4">Same, for the storage trie — toggle count ⇄ bytes. The leaf-weighted average jumps at the inherited 3.5× state (its storage-spam mega-tries are already deep), then keeps climbing.</p>
+        <p class="text-sm text-ink-400 mb-4">Same, for the storage trie — toggle count ⇄ bytes. The leaf-weighted average jumps at the inherited 3.5× state (its storage-spam mega-tries are already deep), then keeps climbing. Dashed line = fitted model + extrapolation.</p>
         <SummaryStatsChart client:visible data={stats.storageDepth} />
+        <Detail summary="is it linear? — theory & extrapolation">
+          <p>Still <strong class="text-ink-100">logarithmic</strong>, not linear (log fit <span class="font-mono">R² 0.99</span> vs linear <span class="font-mono">0.83</span>) — but with a much steeper slope: <span class="font-mono text-ink-100">~3.8 levels per 16× slots</span>, roughly <strong class="text-ink-100">4× the account trie's slope</strong>. Two effects stack on top of the log law: storage growth <em>concentrates</em> into the same ~4,097 mega-tries rather than spreading (so each added order of magnitude deepens those specific tries), and the structural-depth metric counts <em>extension</em> edges — the long shared-prefix chains that sequential storage-spam keys create — not just branch edges.</p>
+          <p>Mainnet (1×) is a deliberate outlier on this curve: its storage is mostly tiny, random-key tries, so the slot-weighted depth (4.84) sits well below the bloatnet trend. Extrapolating the fitted line, a <span class="font-mono">20×</span> state lands near <strong class="text-ink-100">~8.9</strong> levels and <span class="font-mono">50×</span> near <strong class="text-ink-100">~10.2</strong> — still sub-linear, but the depth budget here is the one to watch as state grows.</p>
+        </Detail>
       </Card>
 
       <Card title="Storage slots per contract — the long tail">
@@ -108,8 +116,12 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Slots per contract vs storage size">
-        <p class="text-sm text-ink-400 mb-4">How concentrated storage is: a randomly chosen <em>slot</em> lives in a mega-contract of millions of slots — the <em>slot-weighted</em> average — climbing with the exact storage size (toggle count ⇄ bytes). Note the log y-axis.</p>
+        <p class="text-sm text-ink-400 mb-4">How concentrated storage is: a randomly chosen <em>slot</em> lives in a mega-contract of millions of slots — the <em>slot-weighted</em> average — climbing with the exact storage size (toggle count ⇄ bytes). Note the log y-axis; the dashed line is the fitted power law + extrapolation.</p>
         <SummaryStatsChart client:visible data={stats.slotsPerContract} />
+        <Detail summary="is it linear? — theory & extrapolation">
+          <p>Here the answer flips: <strong class="text-ink-100">super-linear</strong>. The slot-weighted slots-per-contract is the ratio of the second moment to the first, <span class="font-mono">Σsᵢ² / Σsᵢ</span> — so when new slots pile into a <em>fixed</em> set of mega-contracts (contracts-with-storage held at 24.30M from 5× to 10× while slots grew ×1.82), that ratio grows faster than the slot total. A power law <span class="font-mono text-ink-100">slots/contract ∝ S^1.23</span> fits with <span class="font-mono">R² 0.995</span>; the exponent <strong class="text-ink-100">k ≈ 1.23 &gt; 1</strong> is the signature of concentration, not spreading. (A pure linear fit reaches R² 0.98 but assumes the bloat fans out across contracts, which the histogram shows it does not.)</p>
+          <p>Extrapolated: a <span class="font-mono">20×</span> state would put the average hit-contract near <strong class="text-ink-100">~8.7M</strong> slots, <span class="font-mono">50×</span> near <strong class="text-ink-100">~27M</strong>, and <span class="font-mono">100×</span> near <strong class="text-ink-100">~63M</strong> slots — a single contract whose storage trie alone would dominate snap-sync time, exactly the tail the 10× sync already exposed.</p>
+        </Detail>
       </Card>
 
       <Card title="eth_getProof witness size">

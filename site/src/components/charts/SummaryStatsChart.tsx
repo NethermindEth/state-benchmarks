@@ -4,7 +4,8 @@ import { base, valAxis, BRAND } from './echarts-base';
 
 interface XMode { key: string; label: string; axisName: string; kind: 'count' | 'gb'; values: number[] }
 interface Serie { label: string; color: string; values: number[] }
-interface Config { yName?: string; yLog?: boolean; xModes: XMode[]; series: Serie[] }
+interface Theory { label: string; formula: string; fit: string; points: Record<string, [number, number][]> }
+interface Config { yName?: string; yLog?: boolean; xModes: XMode[]; series: Serie[]; theory?: Theory }
 interface Props { data: Config }
 
 const fmtCount = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(2)}B` : `${Math.round(v)}M`); // values are in millions
@@ -16,14 +17,29 @@ export default function SummaryStatsChart({ data }: Props) {
   const xMode = data.xModes[xi]!;
   const xFmt = xMode.kind === 'gb' ? fmtGB : fmtCount;
 
+  const theoryPts = data.theory?.points[xMode.key] ?? null;
+
   const option = useMemo(() => {
     const yFmt = (v: number | null) => (v == null ? '—' : data.yLog ? fmtBig(v) : `${v}`);
-    const xs = xMode.values;
+    const xs = [...xMode.values, ...(theoryPts ? theoryPts.map((p) => p[0]) : [])];
     const xmin = Math.min(...xs), xmax = Math.max(...xs);
-    const xpad = (xmax - xmin) * 0.06 || 1;
+    const xpad = (xmax - xmin) * 0.04 || 1;
+    const theorySerie = theoryPts
+      ? [{
+          name: data.theory!.label,
+          type: 'line' as const,
+          smooth: true,
+          symbol: 'none' as const,
+          z: 1,
+          lineStyle: { width: 1.6, type: 'dashed' as const, color: 'rgba(230,241,248,0.55)' },
+          itemStyle: { color: 'rgba(230,241,248,0.55)' },
+          tooltip: { show: false },
+          data: theoryPts,
+        }]
+      : [];
     return {
       ...base({ legend: true }),
-      legend: { ...base({ legend: true }).legend, data: data.series.map((s) => s.label) },
+      legend: { ...base({ legend: true }).legend, data: [...data.series.map((s) => s.label), ...(data.theory ? [data.theory.label] : [])] },
       tooltip: {
         ...base().tooltip,
         trigger: 'axis' as const,
@@ -49,8 +65,9 @@ export default function SummaryStatsChart({ data }: Props) {
         lineStyle: { width: 2.5, color: s.color }, itemStyle: { color: s.color },
         emphasis: { focus: 'series' as const },
         label: { show: true, position: 'top' as const, color: BRAND.text, fontSize: 10, formatter: (p: { value: [number, number] }) => yFmt(p.value?.[1]) },
+        z: 2,
         data: s.values.map((y, i) => [xMode.values[i], y]),
-      })),
+      })).concat(theorySerie),
     };
   }, [data, xi]);
 
@@ -73,6 +90,12 @@ export default function SummaryStatsChart({ data }: Props) {
         ))}
       </div>
       <EChart option={option} height={320} ariaLabel={data.yName ?? 'summary statistics'} />
+      {data.theory && (
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+          <span className="font-mono text-ink-100">{data.theory.formula}</span>
+          <span className="text-ink-500">{data.theory.fit}</span>
+        </div>
+      )}
     </div>
   );
 }

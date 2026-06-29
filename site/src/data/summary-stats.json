@@ -1,5 +1,5 @@
 {
-  "note": "Each metric's leaf/slot-weighted average vs the exact state size (toggle the x-axis between counts and bytes). DEPTH weighted avg = Σ(depth × leaves) ÷ Σ(leaves) — the leaf-weighted mean, equal to the site's reported avg depth. SLOTS/contract weighted avg = the contract a randomly chosen slot lives in (dominated by the ~4,097 mega-contracts). Milestone order 1× / 3.5× / 5× / 7× / 10×.",
+  "note": "Each metric's leaf/slot-weighted average vs the exact state size (toggle the x-axis between counts and bytes). DEPTH weighted avg = Σ(depth × leaves) ÷ Σ(leaves) — the leaf-weighted mean, equal to the site's reported avg depth. SLOTS/contract weighted avg = the contract a randomly chosen slot lives in (dominated by the ~4,097 mega-contracts). Milestone order 1× / 3.5× / 5× / 7× / 10×. Each chart carries a fitted theoretical model (dashed) with extrapolation past the measured range — see the per-chart formula and the 'theory & extrapolation' details.",
   "accountDepth": {
     "yName": "weighted avg depth (levels)",
     "xModes": [
@@ -8,7 +8,16 @@
     ],
     "series": [
       { "label": "weighted avg (by leaves)", "color": "#00b3ff", "values": [7.61, 7.62, 8.20, 8.32, 8.45] }
-    ]
+    ],
+    "theory": {
+      "label": "log₁₆ model",
+      "formula": "depth = log₁₆(N) + 0.48",
+      "fit": "slope 1.00 in log₁₆ · offset 0.48 · R² 0.99998  (a linear fit reaches only R² 0.94)",
+      "points": {
+        "count": [[381,7.609],[488.89,7.699],[627.32,7.788],[804.95,7.878],[1032.89,7.967],[1325.37,8.056],[1700.66,8.146],[2182.23,8.235],[2800.15,8.325],[3593.06,8.414],[4610.48,8.503],[5916,8.593]],
+        "bytes": [[60.4,7.611],[77.29,7.7],[98.89,7.79],[126.54,7.88],[161.91,7.97],[207.18,8.06],[265.1,8.15],[339.21,8.239],[434.03,8.329],[555.37,8.419],[710.63,8.509],[909.3,8.599]]
+      }
+    }
   },
   "storageDepth": {
     "yName": "weighted avg depth (levels)",
@@ -18,7 +27,16 @@
     ],
     "series": [
       { "label": "weighted avg (by leaves)", "color": "#00b3ff", "values": [4.84, 7.19, 7.24, 7.44, 7.81] }
-    ]
+    ],
+    "theory": {
+      "label": "log₁₆ model",
+      "formula": "depth ≈ 3.8 · log₁₆(S) − 24.2",
+      "fit": "logarithmic, R² 0.99 (linear only 0.83); slope ~3.8 levels per 16× slots — ~4× the account trie's slope-1",
+      "points": {
+        "count": [[1557,4.913],[1974.72,5.239],[2504.51,5.566],[3176.43,5.892],[4028.62,6.219],[5109.44,6.545],[6480.23,6.872],[8218.78,7.198],[10423.76,7.524],[13220.31,7.851],[16767.12,8.177],[21265.5,8.504]],
+        "bytes": [[147.5,4.957],[188.73,5.283],[241.49,5.608],[309,5.934],[395.38,6.259],[505.91,6.585],[647.34,6.911],[828.3,7.236],[1059.85,7.562],[1356.12,7.887],[1735.22,8.213],[2220.3,8.539]]
+      }
+    }
   },
   "slotsPerContract": {
     "yName": "slots per contract (log)",
@@ -29,6 +47,15 @@
     ],
     "series": [
       { "label": "weighted avg (by slots)", "color": "#f472b6", "values": [236995, 1631459, 1774011, 2789583, 3330143] }
-    ]
+    ],
+    "theory": {
+      "label": "power-law model",
+      "formula": "slots/contract ∝ S^1.23",
+      "fit": "super-linear power law, exponent k ≈ 1.23 · R² 0.995 (linear 0.98); k > 1 ⇒ extra slots concentrate, not spread",
+      "points": {
+        "count": [[1557,242054],[1974.72,324559],[2504.51,435186],[3176.43,583519],[4028.62,782413],[5109.44,1049100],[6480.23,1406688],[8218.78,1886161],[10423.76,2529063],[13220.31,3391103],[16767.12,4546966],[21265.5,6096811]],
+        "bytes": [[147.5,250167],[188.73,335550],[241.49,450086],[309,603719],[395.38,809787],[505.91,1086199],[647.34,1456964],[828.3,1954264],[1059.85,2621318],[1356.12,3516030],[1735.22,4716161],[2220.3,6325945]]
+      }
+    }
   }
 }
