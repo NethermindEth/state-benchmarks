@@ -130,7 +130,7 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Snap sync — Nethermind vs Geth">
-        <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). Measured through 5× on both NM→NM and NM→Geth; 7× / 10× snap-sync pending.</p>
+        <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). NM→NM is measured through the headline 10× (27 h 24 m); NM→Geth through 5×. 7× and the 10× Geth pairs are pending.</p>
         <ClientComparisonChart client:visible data={snap.wallTime} clients={snap.clients} unit="h" pendingMults={snap.pendingMults} />
 
         <div class="overflow-x-auto mt-6 rounded-xl border border-ink-800">
@@ -161,8 +161,8 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         </div>
 
         <ChartTakeaways client:visible items={[
-          { text: '✓ 1×–5×', label: 'every run reconstructs the root bit-for-bit', color: '#34d399' },
-          { to: 64, prefix: '−', suffix: '%', label: 'Geth peak RSS vs Nethermind · 3.5×', color: '#00b3ff', bar: 0.64 },
+          { text: '✓ 1×–10×', label: 'every run reconstructs the root bit-for-bit', color: '#34d399' },
+          { to: 9, prefix: '~', suffix: ' h', label: 'one storage trie = ⅓ of the 10× NM sync', color: '#f472b6', bar: 0.33 },
           { to: 80, prefix: '~', suffix: '%', label: 'box idle at 5× — single-peer bound, not HW', color: '#ff9900', bar: 0.80 },
         ]} />
         <Detail summary="why a 10× state isn't a 10× sync">
