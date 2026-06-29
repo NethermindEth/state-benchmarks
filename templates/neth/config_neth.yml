@@ -74,7 +74,7 @@ metrics:
     - "net_rx_bytes_per_sec_avg"
 
 load_test:
-  run_time: "10m"
+  run_time: "5m"
   users: 50
   spawn_rate: 10
   wait_time:
@@ -131,7 +131,7 @@ mock_cl:
 overlay:
   enabled: true
   # Read-only lower layer = the pristine snapshot (matches NETHERMIND_DB_PATH).
-  lowerdir: "/mnt/bigdata/neth-x35-24358000/mainnet"
+  lowerdir: "/mnt/bigdata/neth-x35-24358000-benchmark/mainnet"
   # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
   scratch_dir: "/mnt/bigdata/overlay/nethermind"
   # Compose bind var repointed at <scratch_dir>/merged when enabled.
