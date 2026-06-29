@@ -5,6 +5,7 @@ order: 4
 ---
 
 import Callout from '../../components/ui/Callout.astro';
+import PipelineDiagram from '../../components/PipelineDiagram.astro';
 
 # Feedback loop
 
@@ -15,17 +16,9 @@ multipliers, so the synthetic state has to keep mainnet's composition (≈27 % a
 
 ## The loop
 
-The Go orchestrator runs a strictly sequential, sensor-paced loop:
+The Go orchestrator runs a strictly sequential, sensor-paced loop — step through one tick below:
 
-```
-┌────────────┐   plan (verb mix)   ┌──────────────┐   payload   ┌────────────┐
-│ controller │ ──────────────────► │ facade/verbs │ ──────────► │ Nethermind │
-└────────────┘                     └──────────────┘  Engine API └────────────┘
-      ▲                                                                │
-      │   composition mₖ        ┌─────────┐   BlockDiffs CF            │
-      └─────────────────────────│ sidecar │ ◄──────────────────────────┘
-                                └─────────┘   (RocksDB secondary)
-```
+<PipelineDiagram />
 
 1. The **sidecar** reports the current composition vector $m_k$ (account / storage / code bytes).
 2. The **controller** computes the residual against the target $M^\star$ and picks a verb mix.
