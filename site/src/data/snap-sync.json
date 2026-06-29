@@ -8,6 +8,13 @@
     { "mult": 10,  "nethermind": 27.4 }
   ],
   "pendingMults": [7],
+  "model": {
+    "label": "NM model (linear)",
+    "formula": "t ≈ 5.3 h + 10.0 · (state TB)",
+    "fit": "R² 0.99 across the cross-VM 3.5×/5×/10× runs; effective single-peer throughput ~60–80 GB/h. A power law t ∝ TB^0.74 fits marginally better (R² 0.994) — slightly sub-linear as denser ranges pipeline better.",
+    "predict7x": "≈ 21 h (model prediction; 7× snap sync not yet run)",
+    "points": [{ "mult": 3.5, "y": 13.0 }, { "mult": 5, "y": 16.4 }, { "mult": 7, "y": 20.8 }, { "mult": 10, "y": 27.6 }]
+  },
   "rows": [
     { "mult": "1×",   "pair": "NM → NM",   "wall": "52 min",   "rss": "4.0 GB",  "db": "385 GB", "bitIdentical": true },
     { "mult": "1×",   "pair": "NM → Geth", "wall": "2 h 50 m", "rss": "4.8 GB",  "db": "307 GB", "bitIdentical": true },

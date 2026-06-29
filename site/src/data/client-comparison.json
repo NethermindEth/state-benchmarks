@@ -19,14 +19,14 @@
   ],
   "rpcAggregate": { "gethReq": 49135, "nethReq": 47782, "gethRps": 164, "nethRps": 160, "gethP99": 27, "gethMean": 1.64, "nethP99": 270, "nethMean": 10.29 },
   "execution": [
-    { "metric": "Gas/s — average",       "geth": "684 Mgas/s",   "nethermind": "1,186 Mgas/s", "winner": "nethermind" },
-    { "metric": "Gas/s — peak",          "geth": "1,535 Mgas/s", "nethermind": "3,981 Mgas/s", "winner": "nethermind" },
-    { "metric": "Block processing time", "geth": "~2.43 s",      "nethermind": "~2.09 s",      "winner": "nethermind" },
-    { "metric": "Peak RSS",              "geth": "12.2 GB",      "nethermind": "42.9 GB",      "winner": "geth" },
-    { "metric": "Sustained RSS",         "geth": "9.4 GB",       "nethermind": "29.4 GB",      "winner": "geth" },
-    { "metric": "Disk IOPS — peak",      "geth": "38,826",       "nethermind": "48,565",       "winner": "geth" },
-    { "metric": "Disk throughput — peak","geth": "409 MB/s",     "nethermind": "1,438 MB/s",   "winner": "geth" },
-    { "metric": "Final DB size",         "geth": "2.34 TB",      "nethermind": "1.81 TB",      "winner": "nethermind" }
+    { "metric": "Gas/s — average",       "geth": "684 Mgas/s",   "nethermind": "1,186 Mgas/s", "winner": "nethermind", "ratio": 1.73 },
+    { "metric": "Gas/s — peak",          "geth": "1,535 Mgas/s", "nethermind": "3,981 Mgas/s", "winner": "nethermind", "ratio": 2.59 },
+    { "metric": "Block processing time", "geth": "~2.43 s",      "nethermind": "~2.09 s",      "winner": "nethermind", "ratio": 1.16 },
+    { "metric": "Final DB size",         "geth": "2.34 TB",      "nethermind": "1.81 TB",      "winner": "nethermind", "ratio": 1.29 },
+    { "metric": "Disk IOPS — peak",      "geth": "38,826",       "nethermind": "48,565",       "winner": "geth",       "ratio": 1.25 },
+    { "metric": "Sustained RSS",         "geth": "9.4 GB",       "nethermind": "29.4 GB",      "winner": "geth",       "ratio": 3.13 },
+    { "metric": "Peak RSS",              "geth": "12.2 GB",      "nethermind": "42.9 GB",      "winner": "geth",       "ratio": 3.52 },
+    { "metric": "Disk throughput — peak","geth": "409 MB/s",     "nethermind": "1,438 MB/s",   "winner": "geth",       "ratio": 3.52 }
   ],
   "proofParity": "eth_getProof byte sizes are near-identical across clients — p50 8,072 B (Geth) vs 8,071 B (NM), p95/p99 13,896 vs 13,895 B — exactly as expected for the same state root. EIP-1186 proofs are client-agnostic, so the witness-size metric is comparable regardless of which client serves it.",
   "summary": "Matched at 5 minutes against the same 3.5× state and read load, the two clients land at opposite optima. Geth wins read-serving decisively: aggregate p99 27 ms vs 270 ms (~10×), mean 1.6 ms vs 10.3 ms, with a tight tail uniform across all five methods — and it does it on ~12 GB peak RSS vs Nethermind's ~43 GB (~3.5×). Nethermind wins execution: ~1,186 vs 684 Mgas/s average (~1.7×) and slightly faster per-block processing, plus a smaller on-disk DB (1.81 vs 2.34 TB) — but it pays for the throughput in disk I/O (1,438 vs 409 MB/s peak) and memory. Net: Geth optimizes for cheap, low-latency state reads with a small footprint; Nethermind trades memory + disk I/O for higher execution throughput.",
