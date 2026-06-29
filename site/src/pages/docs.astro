@@ -3,6 +3,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import Section from '../components/Section.astro';
 import Card from '../components/ui/Card.astro';
 import Callout from '../components/ui/Callout.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 <BaseLayout title="Docs" description="How to run the bloating rig: the StateDiffsWriter Nethermind plugin, the Go orchestrator, the sidecar tracker, and cross-EL replay.">
   <div class="mx-auto max-w-3xl px-6 py-12 prose-site">
@@ -244,7 +245,7 @@ nethermind --Sync.SnapSync=true --Init.DiscoveryEnabled=true \\
     <Callout type="note" title="Reading the numbers">
       DB size and peak RSS are topology-independent. Wall time and bandwidth come from a single
       dedicated LAN peer — read them as <em>relative scaling across state sizes</em>, not real-world
-      multi-peer sync time. Measured results are on the <a href="/results">Results</a> page.
+      multi-peer sync time. Measured results are on the <a href={`${base}/results`}>Results</a> page.
     </Callout>
 
     <hr />
