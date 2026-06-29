@@ -115,14 +115,6 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         </Detail>
       </Card>
 
-      <Card title="Slots per contract vs storage size">
-        <p class="text-sm text-ink-400 mb-4">How concentrated storage is: a randomly chosen <em>slot</em> lives in a mega-contract of millions of slots — the <em>slot-weighted</em> average — climbing with the exact storage size (toggle count ⇄ bytes). Note the log y-axis; the dashed line is the fitted power law + extrapolation.</p>
-        <SummaryStatsChart client:visible data={stats.slotsPerContract} />
-        <Detail summary="is it linear? — theory & extrapolation">
-          <p>Here the answer flips: <strong class="text-ink-100">super-linear</strong>. The slot-weighted slots-per-contract is the ratio of the second moment to the first, <span class="font-mono">Σsᵢ² / Σsᵢ</span> — so when new slots pile into a <em>fixed</em> set of mega-contracts (contracts-with-storage held at 24.30M from 5× to 10× while slots grew ×1.82), that ratio grows faster than the slot total. A power law <span class="font-mono text-ink-100">slots/contract ∝ S^1.23</span> fits with <span class="font-mono">R² 0.995</span>; the exponent <strong class="text-ink-100">k ≈ 1.23 &gt; 1</strong> is the signature of concentration, not spreading. (A pure linear fit reaches R² 0.98 but assumes the bloat fans out across contracts, which the histogram shows it does not.)</p>
-          <p>Extrapolated: a <span class="font-mono">20×</span> state would put the average hit-contract near <strong class="text-ink-100">~8.7M</strong> slots, <span class="font-mono">50×</span> near <strong class="text-ink-100">~27M</strong>, and <span class="font-mono">100×</span> near <strong class="text-ink-100">~63M</strong> slots — a single contract whose storage trie alone would dominate snap-sync time, exactly the tail the 10× sync already exposed.</p>
-        </Detail>
-      </Card>
 
       <Card title="eth_getProof witness size">
         <p class="text-sm text-ink-400 mb-4">Same fixed 742-address set in every state — bars are directly comparable. Dashed line = the log₁₆ model.</p>
