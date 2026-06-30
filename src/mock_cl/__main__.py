@@ -31,6 +31,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--engine-url", default="http://localhost:8551", help="Engine API URL")
     parser.add_argument("--jwt", required=True, help="Path to jwt.hex or a 0x/hex secret string")
+    parser.add_argument("--engine-timeout", type=int, default=60,
+                        help="Per-request Engine-API timeout in seconds. Heavy (e.g. x3.5 "
+                             "bloatnet) blocks can take >10s to process; the default 10s killed "
+                             "the replay on a single slow newPayload, so this defaults to 60.")
 
     sub = parser.add_subparsers(dest="subcommand", required=True)
 
@@ -104,7 +108,7 @@ def main(argv=None) -> int:
         summary = _run_record(args)
     else:
         secret = load_secret(args.jwt)
-        engine = EngineClient(args.engine_url, secret)
+        engine = EngineClient(args.engine_url, secret, timeout=args.engine_timeout)
         if args.subcommand == "pivot":
             summary = _run_pivot(args, engine)
         else:

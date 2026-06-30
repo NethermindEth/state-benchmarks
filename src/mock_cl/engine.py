@@ -35,7 +35,7 @@ def newpayload_version_for_fork(fork: Optional[str]) -> Optional[int]:
 class EngineClient:
     """Thin JWT-authenticated Engine-API JSON-RPC client."""
 
-    def __init__(self, engine_url: str, secret: bytes, timeout: int = 10):
+    def __init__(self, engine_url: str, secret: bytes, timeout: int = 60):
         self.engine_url = engine_url
         self.secret = secret
         self.timeout = timeout

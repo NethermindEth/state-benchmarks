@@ -53,12 +53,16 @@ ENGINE_PORT="${CLIENT_ENGINE_PORT:-8551}"
 #                      the geth container mounts at /data/jwt.hex).
 #   MOCK_CL_ENGINE_URL Engine API URL. Defaults to http://localhost:${ENGINE_PORT}.
 #   MOCK_CL_LATENCY_CSV Per-block latency CSV. Defaults to benchmarks/<milestone>/replay_latency.csv.
+#   MOCK_CL_ENGINE_TIMEOUT Per-request Engine-API timeout (s). Defaults to 60 — heavy x3.5
+#                      blocks can take >10s to process; the old 10s default killed the replay
+#                      on a single slow newPayload (see benchmarks/neth-x35-10k-30m/REPORT.md).
 DEFAULT_PAYLOADS="$SCRIPT_DIR/payloads/${MILESTONE}.jsonl"
 DEFAULT_JWT="${GETH_DB_PATH:-/mnt/bigdata/snapshots}/jwt.hex"
 MOCK_CL_PAYLOADS="${MOCK_CL_PAYLOADS:-$DEFAULT_PAYLOADS}"
 MOCK_CL_JWT="${MOCK_CL_JWT:-$DEFAULT_JWT}"
 MOCK_CL_ENGINE_URL="${MOCK_CL_ENGINE_URL:-http://localhost:${ENGINE_PORT}}"
 MOCK_CL_LATENCY_CSV="${MOCK_CL_LATENCY_CSV:-benchmarks/${MILESTONE}/replay_latency.csv}"
+MOCK_CL_ENGINE_TIMEOUT="${MOCK_CL_ENGINE_TIMEOUT:-60}"
 
 echo "[$CLIENT] preflight..."
 
@@ -125,10 +129,12 @@ if [[ -f "$MOCK_CL_PAYLOADS" ]]; then
   echo "  engine_url:  $MOCK_CL_ENGINE_URL"
   echo "  jwt:         $MOCK_CL_JWT"
   echo "  latency_csv: ${MOCK_CL_LATENCY_CSV#$REPO_ROOT/}"
+  echo "  timeout:     ${MOCK_CL_ENGINE_TIMEOUT}s"
   echo "  log:         ${REPLAY_LOG#$REPO_ROOT/}"
   PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" uv run python -m mock_cl \
     --engine-url "$MOCK_CL_ENGINE_URL" \
     --jwt "$MOCK_CL_JWT" \
+    --engine-timeout "$MOCK_CL_ENGINE_TIMEOUT" \
     replay \
     --payloads "$MOCK_CL_PAYLOADS" \
     --latency-csv "$MOCK_CL_LATENCY_CSV" \
