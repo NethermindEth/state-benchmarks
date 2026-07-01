@@ -14,8 +14,8 @@ infrastructure:
   ssh_command: ""
   # Unused when manage=false but kept for reference / `--phase sync` reruns.
   compose_paths:
-    monitoring: "templates/neth/docker-compose.monitoring.yml"
-    clients: "templates/neth/docker-compose.neth-bloatnet.yml"
+    monitoring: "templates/nethermind/docker-compose.monitoring.yml"
+    clients: "templates/nethermind/docker-compose.nethermind-bloatnet.yml"
 
 nodes:
   rpc_url: "http://localhost:8547"
@@ -74,7 +74,7 @@ metrics:
     - "net_rx_bytes_per_sec_avg"
 
 load_test:
-  run_time: "5m"
+  run_time: "10m"
   users: 50
   spawn_rate: 10
   wait_time:

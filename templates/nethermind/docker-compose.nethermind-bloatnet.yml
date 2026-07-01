@@ -69,8 +69,9 @@ services:
       # tracks MinReorgDepth, so raise both well above load_test.recent_block_window
       # (1000) so Locust's pinned recent blocks don't age out as replay advances
       # the head. Costs memory — each retained block keeps a state snapshot bundle.
-      - --FlatDb.MinReorgDepth=1024
-      - --FlatDb.MaxReorgDepth=2048
+      - --FlatDb.MinReorgDepth=128
+      - --FlatDb.MaxReorgDepth=256
+      - --Init.MemoryHint=8000000000
       - --Pruning.Mode=None
       - --JsonRpc.Enabled=true
       - --JsonRpc.Host=0.0.0.0
