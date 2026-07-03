@@ -18,9 +18,10 @@
 # restored before every run. See src/orchestrator/overlay.py.
 #
 # Host paths default to /mnt/bigdata/snapshots; override the GETH_* variables
-# in templates/geth/.env.geth if the host layout differs. The snapshot
-# directory must contain jwt.hex at its root (Geth expects
-# --authrpc.jwtsecret=/data/jwt.hex).
+# in templates/geth/.env.geth if the host layout differs. The JWT secret is
+# mounted as its own volume at /jwt (GETH_JWT_PATH, default ./docker/jwtsecret)
+# — NOT taken from the snapshot — so the snapshot stays pristine and any
+# snapshot boots even if it ships no jwt.hex. mock-CL uses the same file.
 #
 # P2P is fully disabled: no peer sync. The snapshot is the canonical state
 # and the benchmark advances head via the mock-CL engine-API replay, not from
@@ -51,6 +52,11 @@ services:
       - COLORTERM=truecolor
     volumes:
       - ${GETH_DB_PATH:-/mnt/bigdata/snapshots}:/data
+      # JWT is infrastructure, NOT snapshot data — mount it as its own volume
+      # (same file mock-CL uses, mirrors the nethermind template's /jwt mount).
+      # Keeps the snapshot pristine and lets any snapshot boot without shipping
+      # a jwt.hex. Generate once with e.g. `openssl rand -hex 32 > docker/jwtsecret`.
+      - ${GETH_JWT_PATH:-../../docker/jwtsecret}:/jwt:ro
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
       - "${BIND_ADDR:-127.0.0.1}:${CLIENT_WS_PORT:-8546}:8546"
@@ -78,7 +84,7 @@ services:
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
       - --authrpc.vhosts=*
-      - --authrpc.jwtsecret=/data/jwt.hex
+      - --authrpc.jwtsecret=/jwt
       # No --syncmode / --gcmode: the snapshot is snap-synced, so the geth
       # defaults (snap + full) match the on-disk freezer state. Forcing
       # --syncmode=full or --gcmode=archive against a snap-synced DB triggers
