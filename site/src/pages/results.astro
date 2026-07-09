@@ -128,7 +128,7 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Snap sync — Nethermind vs Geth">
-        <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). NM→NM is measured through the headline 10× (27 h 24 m); NM→Geth through 5×. 7× and the 10× Geth pairs are pending.</p>
+        <p class="text-sm text-ink-400 mb-4">Snap-sync wall time from a single frozen peer, by state size (lower is better). NM→NM measured through the headline 10× (27 h 24 m); NM→Geth now measured through 10× too (7× = 29 h 17 m, 10× = 46 h 25 m), each producing a bootable Geth snapshot at the canonical root. 7× NM→NM and the Besu/Reth/Erigon clients are pending.</p>
         <ClientComparisonChart client:visible data={snap.wallTime} clients={snap.clients} unit="h" pendingMults={snap.pendingMults} theory={snap.model.points} theoryLabel={snap.model.label} />
         <div class="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
           <span class="font-mono text-ink-100">{snap.model.formula}</span>
@@ -168,8 +168,8 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
           { to: 80, prefix: '~', suffix: '%', label: 'box idle at 5× — single-peer bound, not HW', color: '#ff9900', bar: 0.80 },
         ]} />
         <Detail summary="is it linear? — theory & extrapolation">
-          <p>For Nethermind, yes — snap sync is fundamentally a <strong class="text-ink-100">bulk state transfer</strong>, so wall time scales <strong class="text-ink-100">linearly with downloaded bytes</strong>: <span class="font-mono text-ink-100">t ≈ 5.3 h + 10.0·(state TB)</span>, R² 0.99 across the cross-VM 3.5×/5×/10× runs. The ~5 h intercept is fixed setup (account ranges + healing); the slope is a single-peer throughput of ~60–80 GB/h. A slightly sub-linear power law (<span class="font-mono">t ∝ TB^0.74</span>) fits marginally better still, because denser freshly-written ranges pipeline more efficiently as the state grows. Extrapolating the model, the un-run <span class="font-mono">7×</span> milestone should land near <strong class="text-ink-100">~21 h</strong> for NM → NM.</p>
-          <p>Geth is the opposite — <strong class="text-ink-100">super-linear</strong>. Its effective throughput <em>collapses</em> as state grows (~78 → 47 → 19 GB/h from 1× → 3.5× → 5×) because a single peer's in-flight request cap throttles the serial mega-trie tail. That's why 5× NM → Geth took ~57 h (3.3× the NM target) on an ~80%-idle box: the ceiling is request concurrency, not bytes or hardware — so the lever is more serving peers, not a bigger machine.</p>
+          <p>Yes — for <em>both</em> clients. Snap sync is fundamentally a <strong class="text-ink-100">bulk state transfer</strong>, so wall time scales <strong class="text-ink-100">linearly with downloaded bytes</strong>. Nethermind fits <span class="font-mono text-ink-100">t ≈ 5.3 h + 10.0·(state TB)</span> (R² 0.99 across the cross-VM 3.5×/5×/10× runs) — the ~5 h intercept is fixed setup (account ranges + healing), the slope a single-peer throughput of ~100 GB/h marginal. Geth fits the same shape, <span class="font-mono text-ink-100">t ≈ 21·(state TB)</span> (R² 0.99), at ~47 GB/h — roughly <strong class="text-ink-100">2× slower</strong> per byte. The NM model predicts the un-run <span class="font-mono">7×</span> NM→NM near <strong class="text-ink-100">~21 h</strong>.</p>
+          <p>The one point that breaks the line is <strong class="text-ink-100">5× NM → Geth (57 h)</strong> — it ran on loopback where a single peer's in-flight request cap throttled the serial mega-trie tail (the box sat ~80% idle). Once the 7× and 10× runs used <span class="font-mono">--snap.exactpivot</span> cross-VM they landed right on Geth's linear trend (29 h and 46 h), confirming the 57 h was a setup artifact, not a scaling wall. So the ceiling is single-peer request concurrency + bandwidth, not state size or hardware — the lever is more serving peers.</p>
         </Detail>
         <Detail summary="why a 10× state isn't a 10× sync">
           <p>{snap.finding}</p>
@@ -185,12 +185,12 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
       </Card>
 
       <Card title="Cross-client read latency — Geth vs Nethermind">
-        <p class="text-sm text-ink-400 mb-4">JSON-RPC <strong class="text-ink-100">p99 latency</strong> per method under 50 concurrent readers at the {clients.milestone} state, 5-min duration-matched (log scale, lower is better). Geth's read tail is ~10× tighter across every method.</p>
+        <p class="text-sm text-ink-400 mb-4">JSON-RPC <strong class="text-ink-100">p99 latency</strong> per method under 50 concurrent readers at the {clients.milestone} state, 60-min duration-matched (log scale, lower is better). Geth's read tail is ~7× tighter across every method.</p>
         <RpcLatencyChart client:visible data={clients.rpcP99} clients={clients.clients} unit="ms" />
         <ChartTakeaways client:visible items={[
-          { to: 27, suffix: ' ms', label: `Geth aggregate p99 (Nethermind ${clients.rpcAggregate.nethP99} ms)`, color: '#ff9900', bar: 0.1 },
-          { to: 10, prefix: '~', suffix: '×', label: 'Geth read-latency tail advantage', color: '#00b3ff', bar: 1 },
-          { text: '0 / 0', label: 'RPC failures — both clients, ~48k requests each', color: '#34d399' },
+          { to: 22, suffix: ' ms', label: `Geth aggregate p99 (Nethermind ${clients.rpcAggregate.nethP99} ms)`, color: '#ff9900', bar: 0.1 },
+          { to: 7, prefix: '~', suffix: '×', label: 'Geth read-latency tail advantage', color: '#00b3ff', bar: 1 },
+          { text: '0 / 0', label: 'RPC failures — both clients, ~590k requests each over the hour', color: '#34d399' },
         ]} />
 
         <p class="text-sm text-ink-400 mt-8 mb-3">Execution & resource cost over the same run — <strong class="text-ink-100">opposite optima</strong>. Each bar shows how many × the winning client beats the other on that metric: Geth leans leaner (memory, disk), Nethermind leans faster (throughput, DB size).</p>
@@ -202,7 +202,7 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
                 <th class="px-3 py-2 font-medium">Metric</th>
                 <th class="px-3 py-2 font-medium text-right">Geth</th>
                 <th class="px-3 py-2 font-medium text-right">Nethermind</th>
-                <th class="px-3 py-2 font-medium text-center">Leaner</th>
+                <th class="px-3 py-2 font-medium text-center">Winner</th>
               </tr>
             </thead>
             <tbody class="text-ink-200">

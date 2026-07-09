@@ -1,5 +1,5 @@
 {
-  "note": "Project pull requests by the three contributors across the project repos and the upstream Ethereum specs. Closed-unmerged PRs are excluded. Dates are when each PR was opened; the badge shows current status. Generated from a GitHub scan on 2026-06-25.",
+  "note": "Project pull requests by the three contributors across the project repos and the upstream Ethereum specs. Closed-unmerged PRs are excluded. Dates are when each PR was opened; the badge shows current status. Generated from a GitHub scan on 2026-07-09.",
   "repos": {
     "nethermind": "NethermindEth/nethermind",
     "state-benchmarks": "NethermindEth/state-benchmarks",
@@ -9,13 +9,14 @@
     "go-ethereum": "ethereum/go-ethereum"
   },
   "prs": [
+    { "date": "2026-06-30", "repo": "go-ethereum", "number": 35265, "status": "open", "author": "AnkushinDaniil", "title": "eth/downloader, cmd: add --snap.exactpivot for exact-head snap sync", "url": "https://github.com/ethereum/go-ethereum/pull/35265" },
     { "date": "2026-06-18", "repo": "nethermind", "number": 12059, "status": "merged", "author": "AnkushinDaniil", "title": "eth/rlpx: cap outgoing block bodies under the devp2p message-size limit", "url": "https://github.com/NethermindEth/nethermind/pull/12059" },
     { "date": "2026-06-17", "repo": "go-ethereum", "number": 35189, "status": "open", "author": "AnkushinDaniil", "title": "eth/downloader, cmd: add --snap.skipreceipts for state-only snap sync", "url": "https://github.com/ethereum/go-ethereum/pull/35189" },
     { "date": "2026-06-16", "repo": "state-benchmarks", "number": 36, "status": "merged", "author": "AnkushinDaniil", "title": "Mock consensus layer (Engine-API driver) for frozen-milestone snap-sync + replay", "url": "https://github.com/NethermindEth/state-benchmarks/pull/36" },
     { "date": "2026-06-12", "repo": "nethermind", "number": 11981, "status": "merged", "author": "AnkushinDaniil", "title": "Merge.Plugin: produce testing_commitBlockV1 blocks on the main world state", "url": "https://github.com/NethermindEth/nethermind/pull/11981" },
     { "date": "2026-06-12", "repo": "state-benchmarks", "number": 34, "status": "draft", "author": "dmitriy-b", "title": "Locust-based benchmarking framework", "url": "https://github.com/NethermindEth/state-benchmarks/pull/34" },
     { "date": "2026-06-09", "repo": "nethermind", "number": 11943, "status": "merged", "author": "AnkushinDaniil", "title": "Sync.StaticSnapPivot — fixed-pivot snap sync from a frozen peer", "url": "https://github.com/NethermindEth/nethermind/pull/11943" },
-    { "date": "2026-05-27", "repo": "nethermind", "number": 11788, "status": "draft", "author": "AnkushinDaniil", "title": "StateDiffsWriter — replace the StateComposition plugin (diff-only + Go sidecar)", "url": "https://github.com/NethermindEth/nethermind/pull/11788" },
+    { "date": "2026-05-27", "repo": "nethermind", "number": 11788, "status": "merged", "author": "AnkushinDaniil", "title": "StateDiffsWriter — replace the StateComposition plugin (diff-only + Go sidecar)", "url": "https://github.com/NethermindEth/nethermind/pull/11788" },
     { "date": "2026-05-25", "repo": "nethermind", "number": 11746, "status": "merged", "author": "marcindsobczak", "title": "Validate FCU safe/finalized by ancestry when main-chain markers are outdated", "url": "https://github.com/NethermindEth/nethermind/pull/11746" },
     { "date": "2026-05-19", "repo": "nethermind", "number": 11681, "status": "merged", "author": "marcindsobczak", "title": "Fix forkchoice-update (FCU) validation order", "url": "https://github.com/NethermindEth/nethermind/pull/11681" },
     { "date": "2026-05-13", "repo": "nethermind", "number": 11586, "status": "merged", "author": "AnkushinDaniil", "title": "StateComposition: refuse to publish a partial-scan baseline", "url": "https://github.com/NethermindEth/nethermind/pull/11586" },
