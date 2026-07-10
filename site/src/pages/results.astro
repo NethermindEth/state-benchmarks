@@ -9,7 +9,8 @@ import CompositionChart from '../components/charts/CompositionChart.tsx';
 import ClientComparisonChart from '../components/charts/ClientComparisonChart.tsx';
 import TrieDepthChart from '../components/charts/TrieDepthChart.tsx';
 import SlotHistogramChart from '../components/charts/SlotHistogramChart.tsx';
-import AdvantageChart from '../components/charts/AdvantageChart.tsx';
+import MilestoneLatency from '../components/charts/MilestoneLatency.tsx';
+import MilestoneAdvantage from '../components/charts/MilestoneAdvantage.tsx';
 import ScalingContrast from '../components/charts/ScalingContrast.tsx';
 import ChartTakeaways from '../components/charts/ChartTakeaways.tsx';
 import SummaryStatsChart from '../components/charts/SummaryStatsChart.tsx';
@@ -183,81 +184,25 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
         </div>
       </Card>
 
-      <Card title="Cross-client read latency — Geth vs Nethermind across milestones">
-        <p class="text-sm text-ink-400 mb-4">Aggregate JSON-RPC <strong class="text-ink-100">p99 read latency</strong> under 50 concurrent readers, Nethermind vs Geth <strong class="text-ink-100">across state sizes</strong> — one chart, 5-minute work-comparable runs (log scale, lower is better). Geth's read tail stays several × tighter as the state grows; 7× / 10× pending.</p>
-        <ClientComparisonChart client:visible data={clients.latency.p99} clients={clients.clients} unit="ms" pendingMults={clients.latency.pendingMults} logY showLabels yName="p99 read latency" />
-
-        <div class="overflow-x-auto mt-4 rounded-xl border border-ink-800">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="bg-ink-900 text-ink-300 text-left">
-                <th class="px-3 py-2 font-medium">State</th>
-                <th class="px-3 py-2 font-medium text-right"><span class="text-accent-300">Nethermind</span> p99</th>
-                <th class="px-3 py-2 font-medium text-right">NM mean</th>
-                <th class="px-3 py-2 font-medium text-right"><span style="color:#ff9900">Geth</span> p99</th>
-                <th class="px-3 py-2 font-medium text-right">Geth mean</th>
-              </tr>
-            </thead>
-            <tbody class="text-ink-200">
-              {clients.latency.table.map((r) => (
-                <tr class="border-t border-ink-800">
-                  <td class="px-3 py-2 font-mono text-white">{r.mult}</td>
-                  <td class="px-3 py-2 text-right tabular-nums">{r.nmP99} ms</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-ink-400">{r.nmMean} ms</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-white">{r.gethP99} ms</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-ink-400">{r.gethMean} ms</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <Card title="Cross-client — Geth vs Nethermind (by milestone)">
+        <p class="text-sm text-ink-400 mb-4">Per-endpoint JSON-RPC <strong class="text-ink-100">p99 read latency</strong> under 50 concurrent readers, Nethermind vs Geth. The <strong class="text-ink-100">milestone switcher auto-cycles</strong> (or click a pill) — each view is one state size. Log scale, lower is better. Geth's read tail stays several × tighter across every endpoint.</p>
+        <MilestoneLatency client:visible milestones={clients.milestones} pending={clients.pendingMilestones} />
 
         <ChartTakeaways client:visible items={[
-          { text: '4–6×', label: 'Geth read-tail advantage — holds at both 3.5× and 5×', color: '#00b3ff' },
-          { to: 360, suffix: ' ms', label: 'Nethermind p99 at 5× (Geth 110 ms)', color: '#ff9900', bar: 1 },
-          { text: '0 / 0', label: 'RPC failures — both clients, every run', color: '#34d399' },
+          { text: '4–6×', label: 'Geth read-tail advantage — every endpoint, both milestones', color: '#00b3ff' },
+          { text: '≈ equal', label: 'p95 & throughput — the gap is the p99 tail, not typical reads', color: '#34d399' },
+          { text: '0 / 0', label: 'RPC failures — both clients, every run', color: '#7ba6c0' },
         ]} />
-        <p class="text-xs text-ink-500 mt-3">{clients.latency.note}</p>
 
         <div class="mt-10 pt-6 border-t border-ink-800">
-          <p class="text-sm text-ink-400 mb-1"><strong class="text-ink-100">Execution &amp; resource cost — opposite optima.</strong> Each bar shows how many × the winning client beats the other on that metric: Geth leans leaner (memory, disk), Nethermind leans faster (throughput, DB size). The read-latency win above is Geth's; the execution win is Nethermind's.</p>
-          <p class="text-xs text-ink-500 mb-3 mt-4 font-mono">3.5× · 60-minute run</p>
-          <AdvantageChart client:visible data={clients.execution} />
-          <div class="overflow-x-auto rounded-xl border border-ink-800 mt-4">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="bg-ink-900 text-ink-300 text-left">
-                  <th class="px-3 py-2 font-medium">Metric</th>
-                  <th class="px-3 py-2 font-medium text-right">Geth</th>
-                  <th class="px-3 py-2 font-medium text-right">Nethermind</th>
-                  <th class="px-3 py-2 font-medium text-center">Winner</th>
-                </tr>
-              </thead>
-              <tbody class="text-ink-200">
-                {clients.execution.map((r) => (
-                  <tr class="border-t border-ink-800">
-                    <td class="px-3 py-2">{r.metric}</td>
-                    <td class:list={['px-3 py-2 text-right tabular-nums font-mono', r.winner === 'geth' ? 'text-white' : 'text-ink-300']}>{r.geth}</td>
-                    <td class:list={['px-3 py-2 text-right tabular-nums font-mono', r.winner === 'nethermind' ? 'text-white' : 'text-ink-300']}>{r.nethermind}</td>
-                    <td class="px-3 py-2 text-center">
-                      <span class:list={['text-xs font-mono px-2 py-0.5 rounded', r.winner === 'geth' ? 'bg-accent-500/15 text-accent-300' : 'bg-signal-good/15 text-signal-good']}>{r.winner === 'geth' ? 'Geth' : 'NM'}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <p class="text-xs text-ink-500 mb-3 mt-6 font-mono">5× · 5-minute work-matched run</p>
-          <AdvantageChart client:visible data={clients.x5.execution} />
+          <p class="text-sm text-ink-400 mb-4"><strong class="text-ink-100">Execution &amp; resource cost — opposite optima.</strong> Each bar shows how many × the winning client beats the other on that metric: Nethermind leans faster (gas throughput, smaller DB), Geth leans leaner (memory). Same milestone switcher — the chart and its numbers switch together.</p>
+          <MilestoneAdvantage client:visible milestones={clients.milestones} pending={clients.pendingMilestones} />
 
           <Detail summary="what the cross-client benchmark shows">
             <p>{clients.summary}</p>
             <p>{clients.proofParity}</p>
-            <p>{clients.x5.summary}</p>
-            <p>{clients.x5.workMatched}</p>
+            <p>{clients.workMatched}</p>
             <p class="text-xs text-ink-500">{clients.caveat}</p>
-            <p class="text-xs text-ink-500">{clients.window}</p>
           </Detail>
         </div>
       </Card>
