@@ -3,21 +3,20 @@
   "measured": true,
   "milestone": "3.5×",
   "window": "60-minute duration-matched runs (a 5-min run agrees) at the 3.5× bloatnet (perf-devnet-3, head 24,358,000) on state-vm-1, under live head + 50 concurrent Locust read clients. Nethermind master (1.40.0-unstable) vs Geth master; overlay isolation; mock-CL replay of blocks 24,358,001+. 0 RPC failures on either client (587k / 595k requests over the hour).",
-  "rpcP99": [
-    { "method": "eth_getBalance",   "geth": 22, "nethermind": 160 },
-    { "method": "eth_getStorageAt", "geth": 23, "nethermind": 160 },
-    { "method": "eth_call",         "geth": 22, "nethermind": 170 },
-    { "method": "eth_getCode",      "geth": 21, "nethermind": 150 },
-    { "method": "eth_getProof",     "geth": 25, "nethermind": 180 }
-  ],
-  "rpcTable": [
-    { "method": "eth_getBalance",   "gethP50": 0, "gethP95": 1, "gethP99": 22, "gethMean": 1.51, "nethP50": 0, "nethP95": 1, "nethP99": 160, "nethMean": 5.70 },
-    { "method": "eth_getStorageAt", "gethP50": 0, "gethP95": 1, "gethP99": 23, "gethMean": 1.51, "nethP50": 0, "nethP95": 1, "nethP99": 160, "nethMean": 5.79 },
-    { "method": "eth_call",         "gethP50": 0, "gethP95": 1, "gethP99": 22, "gethMean": 1.53, "nethP50": 0, "nethP95": 1, "nethP99": 170, "nethMean": 6.12 },
-    { "method": "eth_getCode",      "gethP50": 0, "gethP95": 1, "gethP99": 21, "gethMean": 1.53, "nethP50": 0, "nethP95": 1, "nethP99": 150, "nethMean": 5.51 },
-    { "method": "eth_getProof",     "gethP50": 1, "gethP95": 2, "gethP99": 25, "gethMean": 2.06, "nethP50": 0, "nethP95": 2, "nethP99": 180, "nethMean": 5.81 }
-  ],
-  "rpcAggregate": { "gethReq": 594711, "nethReq": 587244, "gethRps": 165.2, "nethRps": 163.1, "gethP99": 22, "gethMean": 1.57, "nethP99": 160, "nethMean": 5.78 },
+  "latency": {
+    "window": "Aggregate JSON-RPC p99 read latency under 50 concurrent readers, 5-minute runs (the window that stays work-comparable across milestones). Lower is better; all five methods track within ~30 ms of the aggregate; 0 failures either client.",
+    "unit": "ms",
+    "p99": [
+      { "mult": 3.5, "nethermind": 250, "geth": 44 },
+      { "mult": 5,   "nethermind": 360, "geth": 110 }
+    ],
+    "pendingMults": [7, 10],
+    "table": [
+      { "mult": "3.5×", "nmP99": 250, "nmMean": 8.13, "gethP99": 44,  "gethMean": 2.10 },
+      { "mult": "5×",   "nmP99": 360, "nmMean": 12.75, "gethP99": 110, "gethMean": 3.71 }
+    ],
+    "note": "Both clients' read tail grows with state size, and Geth stays ~4–6× lower at every milestone. Over a full 60-min run with more cache warmup both tighten further (3.5×: NM 160 / Geth 22 ms) but the gap holds. The 60-min 5× run is deliberately excluded from this comparison because it was not work-matched — Geth imported 1,278 blocks vs Nethermind's 561, so its 60-min tail reflects 2.3× the import load, not the read path. 7× / 10× cross-client execution pending."
+  },
   "execution": [
     { "metric": "Gas/s — average",       "geth": "816 Mgas/s",   "nethermind": "2,014 Mgas/s", "winner": "nethermind", "ratio": 2.47 },
     { "metric": "Gas/s — peak",          "geth": "2,864 Mgas/s", "nethermind": "5,049 Mgas/s", "winner": "nethermind", "ratio": 1.76 },
@@ -40,8 +39,6 @@
       { "metric": "Gas/s — average",  "geth": "1,480 Mgas/s", "nethermind": "4,469 Mgas/s", "winner": "nethermind", "ratio": 3.02 },
       { "metric": "Gas/s — peak",     "geth": "2,126 Mgas/s", "nethermind": "8,142 Mgas/s", "winner": "nethermind", "ratio": 3.83 },
       { "metric": "Final DB size",    "geth": "3.06 TB",      "nethermind": "2.23 TB",      "winner": "nethermind", "ratio": 1.37 },
-      { "metric": "RPC mean latency", "geth": "3.7 ms",       "nethermind": "12.8 ms",      "winner": "geth",       "ratio": 3.44 },
-      { "metric": "RPC p99 latency",  "geth": "110 ms",       "nethermind": "360 ms",       "winner": "geth",       "ratio": 3.27 },
       { "metric": "Sustained RSS",    "geth": "22.7 GB",      "nethermind": "52.6 GB",      "winner": "geth",       "ratio": 2.32 },
       { "metric": "Peak RSS",         "geth": "28.7 GB",      "nethermind": "69.1 GB",      "winner": "geth",       "ratio": 2.41 }
     ],

@@ -4,7 +4,7 @@ import { base, catAxis, valAxis, BRAND } from './echarts-base';
 
 type Row = { mult: number } & Record<string, number>;
 interface TheoryPt { mult: number; y: number }
-interface Props { data: Row[]; clients?: string[]; unit?: string; pendingMults?: number[]; theory?: TheoryPt[]; theoryLabel?: string }
+interface Props { data: Row[]; clients?: string[]; unit?: string; pendingMults?: number[]; theory?: TheoryPt[]; theoryLabel?: string; logY?: boolean; showLabels?: boolean; yName?: string }
 
 const COLORS: Record<string, string> = {
   nethermind: BRAND.blue,
@@ -14,7 +14,7 @@ const COLORS: Record<string, string> = {
   erigon: '#c084fc',
 };
 
-export default function ClientComparisonChart({ data, clients = ['nethermind', 'geth'], unit = 'ms', pendingMults = [], theory = [], theoryLabel = 'model' }: Props) {
+export default function ClientComparisonChart({ data, clients = ['nethermind', 'geth'], unit = 'ms', pendingMults = [], theory = [], theoryLabel = 'model', logY = false, showLabels = false, yName = '' }: Props) {
   const option = useMemo(() => {
     const mults = [...data.map((d) => d.mult), ...pendingMults].sort((a, b) => a - b);
     const cats = mults.map((m) => `${m}×`);
@@ -27,6 +27,9 @@ export default function ClientComparisonChart({ data, clients = ['nethermind', '
       barWidth: clients.length > 2 ? '13%' : '24%',
       itemStyle: { color: COLORS[c] ?? BRAND.textDim, borderRadius: [2, 2, 0, 0] },
       emphasis: { focus: 'series' as const },
+      label: showLabels
+        ? { show: true, position: 'top' as const, color: BRAND.textDim, fontSize: 11, formatter: (p: { value: number | null }) => (p.value == null ? '' : `${p.value}${unit ? ' ' + unit : ''}`) }
+        : undefined,
       data: mults.map((m) => (byMult.get(m) as Row | undefined)?.[c] ?? null),
     }));
 
@@ -49,10 +52,13 @@ export default function ClientComparisonChart({ data, clients = ['nethermind', '
       legend: { ...base({ legend: true }).legend, data: [...clients, ...(theory.length ? [theoryLabel] : [])] },
       tooltip: { ...base().tooltip, valueFormatter: (v: number) => (v == null ? 'pending' : `${v} ${unit}`) },
       xAxis: catAxis('', { data: cats }),
-      yAxis: valAxis('', { axisLabel: { color: BRAND.textDim, formatter: `{value} ${unit}` } }),
+      yAxis: valAxis(yName, {
+        ...(logY ? { type: 'log' as const, min: 1 } : {}),
+        axisLabel: { color: BRAND.textDim, formatter: `{value} ${unit}` },
+      }),
       series,
     };
-  }, [data, clients, unit, pendingMults, theory, theoryLabel]);
+  }, [data, clients, unit, pendingMults, theory, theoryLabel, logY, showLabels, yName]);
 
   return <EChart option={option} height={360} ariaLabel="Client comparison across milestones" />;
 }
