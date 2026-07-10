@@ -226,6 +226,16 @@ const share = (part: number, total: number) => `${((part / total) * 100).toFixed
           <p class="text-xs text-ink-500">{clients.caveat}</p>
         </Detail>
         <p class="text-xs text-ink-500 mt-3">{clients.window}</p>
+
+        <div class="mt-8 pt-6 border-t border-ink-800">
+          <p class="text-sm text-ink-400 mb-3">The same battery now at <strong class="text-ink-100">5×</strong>, <strong class="text-ink-100">work-matched</strong> (both clients replayed ~140 blocks) — the same opposite optima hold: Geth lower read tail + lighter RAM, Nethermind higher gas throughput + smaller DB.</p>
+          <AdvantageChart client:visible data={clients.x5.execution} />
+          <Detail summary="the 60-minute inversion — duration ≠ work">
+            <p>{clients.x5.summary}</p>
+            <p>{clients.x5.workMatched}</p>
+            <p class="text-xs text-ink-500">{clients.x5.window}</p>
+          </Detail>
+        </div>
       </Card>
     </div>
 
