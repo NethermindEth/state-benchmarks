@@ -7,6 +7,7 @@ interface Milestone {
   mult: number;
   label: string;
   window: string;
+  note?: string;
   agg: Agg;
   latency: ({ method: string } & Record<string, number>)[];
 }
@@ -19,6 +20,9 @@ export default function MilestoneLatency({ milestones, pending = [] }: Props) {
   return (
     <div>
       <MilestonePills labels={milestones.map((x) => x.label)} active={idx} onPick={pick} pending={pending} />
+      {m.note && (
+        <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200/90">{m.note}</p>
+      )}
       <EndpointLatencyChart data={m.latency} />
       <p className="mt-2 text-xs text-ink-500">
         <span className="font-mono text-ink-300">{m.label} · {m.window}</span> — aggregate p99{' '}

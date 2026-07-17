@@ -3,7 +3,7 @@ import MilestonePills from './MilestonePills.tsx';
 import AdvantageChart from './AdvantageChart.tsx';
 
 interface Row { metric: string; geth: string; nethermind: string; winner: 'geth' | 'nethermind'; ratio: number }
-interface Milestone { mult: number; label: string; window: string; execution: Row[] }
+interface Milestone { mult: number; label: string; window: string; note?: string; execution: Row[] }
 interface Props { milestones: Milestone[]; pending?: string[] }
 
 // Execution & resource "opposite optima" advantage chart with a milestone
@@ -16,6 +16,9 @@ export default function MilestoneAdvantage({ milestones, pending = [] }: Props) 
     <div>
       <MilestonePills labels={milestones.map((x) => x.label)} active={idx} onPick={pick} pending={pending} />
       <p className="text-xs font-mono text-ink-500 mb-2">{m.label} · {m.window}</p>
+      {m.note && (
+        <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200/90">{m.note}</p>
+      )}
       <AdvantageChart data={m.execution} />
       <div className="overflow-x-auto rounded-xl border border-ink-800 mt-4">
         <table className="w-full text-sm">
