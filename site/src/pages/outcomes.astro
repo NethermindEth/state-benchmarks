@@ -1,0 +1,166 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Section from '../components/Section.astro';
+import Card from '../components/ui/Card.astro';
+import Stat from '../components/ui/Stat.astro';
+import growth from '../data/state-growth.json';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const m1 = growth.milestones.find((m) => m.mult === 1)!;
+const mx = growth.milestones.find((m) => m.mult === 10)!;
+const fmtTB = (gb: number) => (gb >= 1000 ? `${(gb / 1000).toFixed(2)} TB` : `${Math.round(gb)} GB`);
+const fmtCount = (m: number | null) =>
+  m == null ? '—' : m >= 1000 ? `${(m / 1000).toFixed(2)}B` : `${m}M`;
+
+// The four outcomes, aligned 1:1 with the EF-grant conclusions: what a client
+// or protocol team should take away, not the research process behind it.
+const outcomes = [
+  {
+    n: '01',
+    h: 'Clients hold at 10× — no collapse',
+    p: `Both tested clients (Nethermind and Geth) executed blocks, served RPC reads, and snap-synced the full 10× state — 2.22 TB, 10.03× mainnet. There is no sudden performance cliff anywhere between 1× and 10×. The fear that a large state simply breaks execution did not materialise.`,
+    tag: 'no cliff, 1×→10×',
+  },
+  {
+    n: '02',
+    h: 'Trie depth grows as log₁₆(N) — witnesses stay tiny',
+    p: `Account-trie depth tracks log₁₆(N) almost perfectly (R² = 0.99998): the whole 1×→10× climb adds under one level (7.61 → 8.45), and a single account proof grows just +11% across it (~+21% extrapolated to 100×). The storage trie deepens faster because bloat concentrates in a few thousand giant contracts — that is the budget to watch, and the real-state MPT baseline any binary-tree migration (EIP-7864) must be judged against.`,
+    tag: '+11% witness, 1×→10×',
+  },
+  {
+    n: '03',
+    h: 'Snap sync is linear — but one giant trie is the wall',
+    p: `Sync time grows roughly linearly with state size — ~100 GB/h for Nethermind, ~47 GB/h for Geth from a single peer — so a full 10× sync takes 27–46 h, always reconstructing the state root bit-for-bit. The bottleneck is single-peer request limits and giant storage tries: one trie alone took ~9 h, a third of the entire 10× sync, and it cannot be parallelised (Amdahl's law). A single contract can concentrate the whole state's sync weight into one serial chain — a resilience concern, even though building the trie is itself gas-metered.`,
+    tag: '~⅓ = one trie',
+  },
+  {
+    n: '04',
+    h: 'Every state is reproducible and verifiable',
+    p: `Each milestone is generated through the real Engine-API state-transition path, so any client can replay it and verify it against the state root, bit for bit. The bloat / scan / snap / replay tooling is reusable for every future fork — a ready state-scale regression suite for devnets and CI.`,
+    tag: 'reusable tooling',
+  },
+];
+
+const sevMeta: Record<string, { label: string; cls: string }> = {
+  act:   { label: 'Act first', cls: 'text-signal-danger border-signal-danger/40 bg-signal-danger/10' },
+  plan:  { label: 'Plan for',  cls: 'text-brand-orange border-brand-orange/40 bg-brand-orange/10' },
+  lever: { label: 'Lever',     cls: 'text-signal-good border-signal-good/40 bg-signal-good/10' },
+};
+
+// Actionable, client-agnostic recommendations — the "so what" for core devs.
+const recs = [
+  {
+    track: 'Harden L1 · Resilience',
+    sev: 'plan',
+    h: 'Price the sync burden of giant storage contracts',
+    p: `One mega-contract storage trie is the snap-sync bottleneck — a third of the 10× sync, and non-parallelisable. Building one is not cheap (each new slot costs ~20,000 gas), but that gas is a one-time payment while the serial sync and permanent storage it forces on every node are not — the classic state-growth mispricing. Super-linear storage repricing or a per-contract storage-growth cap would price that in and shorten the sync tail.`,
+  },
+  {
+    track: 'Harden L1 · Interop',
+    sev: 'act',
+    h: 'Fix p2p body sizing before large blocks',
+    p: `At 8-Ggas blocks, encoded bodies reach 26–47 MB and overflow the 16 MB devp2p / 24-bit RLPx frame — Nethermind dropped its snap peer every ~35 s until its size estimator was corrected (merged: #12059). Any client that will serve 100M-gas blocks needs exact body-size accounting, including access / authorization lists.`,
+  },
+  {
+    track: 'Scale · Glamsterdam',
+    sev: 'plan',
+    h: 'Reprice on state accesses, not proof bytes',
+    p: `The witness is log-flat in size, so a block's witness ≈ (number of state accesses) × (a roughly constant per-access cost). Gas should track the number of accesses per block (EIP-7928 access lists, EIP-8037/8038 repricing) — the lever that keeps a 100M-gas block's witness bounded, without touching the tree.`,
+  },
+  {
+    track: 'Harden L1',
+    sev: 'lever',
+    h: 'Add snap-serving peers',
+    p: `Snap scales with bytes, but the box sat ~80% idle at 5× — the ceiling is single-peer request concurrency, not hardware. More serving peers directly shortens sync time; it is the cheapest resilience win.`,
+  },
+];
+
+---
+<BaseLayout
+  title="Outcomes"
+  description="What benchmarking Ethereum clients to 10× mainnet state found — and what it means for core developers."
+>
+  <Section
+    eyebrow="Outcomes & Recommendations"
+    title="A 10× state is not a 10× cost."
+    intro="We bloated a real mainnet snapshot to 10.03× and benchmarked two execution clients end-to-end. The costs that actually grow are memory pressure and a few giant contracts — not tree depth or proof size, which stay almost flat. Here is what that means for core developers."
+  >
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <Stat measured value={`${(mx.totalGB / m1.totalGB).toFixed(2)}×`} label="State reached" sub={`${fmtTB(mx.totalGB)} · mainnet-faithful`} />
+      <Stat measured value="log₁₆(N)" label="Account depth law" sub="R² = 0.99998 · <1 level added" />
+      <Stat measured value="+11%" label="Witness, 1×→10×" sub="~+21% at 100×" />
+      <Stat measured value="bit-exact" label="Snap-sync to 10×" sub="verified vs state root" />
+      <Stat measured value="0" label="RPC failures" sub="both clients, every run" />
+    </div>
+
+    <div class="mt-10 overflow-x-auto rounded-2xl border border-ink-800">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-ink-900 text-ink-300 text-left">
+            <th class="px-4 py-3 font-medium">Milestone</th>
+            <th class="px-4 py-3 font-medium text-right">Total</th>
+            <th class="px-4 py-3 font-medium text-right">Accounts</th>
+            <th class="px-4 py-3 font-medium text-right">Storage slots</th>
+            <th class="px-4 py-3 font-medium text-right">Acct depth</th>
+          </tr>
+        </thead>
+        <tbody class="text-ink-200">
+          {growth.milestones.map((m) => (
+            <tr class="border-t border-ink-800 hover:bg-ink-900/40">
+              <td class="px-4 py-3 font-mono text-white">{m.mult}×</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.totalGB != null ? fmtTB(m.totalGB) : '—'}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{fmtCount(m.accounts)}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{fmtCount(m.storage)}</td>
+              <td class="px-4 py-3 text-right tabular-nums">{m.accountDepth ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-sm text-ink-400">
+      Every milestone is a full-state scan. The interactive charts, depth laws and cross-client data live on
+      <a href={`${base}/results`} class="text-accent-400 hover:text-accent-300">Results</a>.
+    </p>
+  </Section>
+
+  <Section
+    eyebrow="Outcomes"
+    title="Four things we learned."
+    intro="Each holds on real mainnet state and was checked bit-for-bit against the state root. These are properties of the protocol, not of one client."
+    className="pt-0"
+  >
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {outcomes.map((o) => (
+        <Card>
+          <div class="flex items-start justify-between gap-4 mb-2">
+            <span class="font-mono text-accent-400 text-lg">{o.n}</span>
+            <span class="font-mono text-[11px] px-2 py-1 rounded-md bg-ink-800 text-brand-orange whitespace-nowrap">{o.tag}</span>
+          </div>
+          <h3 class="font-display text-xl text-white mb-2 leading-snug">{o.h}</h3>
+          <p class="text-sm text-ink-300 leading-relaxed">{o.p}</p>
+        </Card>
+      ))}
+    </div>
+  </Section>
+
+  <Section
+    eyebrow="Recommendations"
+    title="What it asks of core developers."
+    intro="Four concrete, client-agnostic actions. The chip flags whether it needs doing now, planning for, or is a longer-term lever."
+    className="pt-0"
+  >
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {recs.map((r) => (
+        <div class="rounded-2xl border border-ink-800 bg-ink-900/60 p-6 flex flex-col">
+          <div class="flex items-center gap-2 flex-wrap mb-3">
+            <span class="font-mono text-[10px] uppercase tracking-[0.14em] text-accent-400 border border-accent-500/40 rounded-full px-2.5 py-0.5">{r.track}</span>
+            <span class:list={['font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border', sevMeta[r.sev].cls]}>{sevMeta[r.sev].label}</span>
+          </div>
+          <h3 class="font-display text-lg text-white mb-2 leading-snug">{r.h}</h3>
+          <p class="text-sm text-ink-300 leading-relaxed">{r.p}</p>
+        </div>
+      ))}
+    </div>
+  </Section>
+
+</BaseLayout>
