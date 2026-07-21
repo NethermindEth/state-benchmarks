@@ -264,6 +264,46 @@ def test_replay_driver_invalid_raises_and_stops():
     ]
 
 
+def test_replay_driver_polls_fcu_until_syncing_block_lands(tmp_path, monkeypatch):
+    """A SYNCING newPayload is FCU-polled to VALID and recorded as landed."""
+    monkeypatch.setattr(drivers.time, "sleep", lambda *_: None)
+    engine = _FakeEngine(["SYNCING"])
+    fcu_statuses = ["SYNCING", "SYNCING", "VALID"]
+
+    def fcu(head, **kwargs):
+        engine.calls.append(("forkchoice_updated", head))
+        return {"payloadStatus": {"status": fcu_statuses.pop(0)}}
+
+    engine.forkchoice_updated = fcu
+    csv_path = tmp_path / "lat.csv"
+
+    summary = ReplayDriver(engine, [_record("0x1", 1)], latency_csv=str(csv_path)).run()
+
+    assert summary["blocks"] == 1
+    assert engine.calls == [
+        ("new_payload", "0x1"),
+        ("forkchoice_updated", "0x1"),
+        ("forkchoice_updated", "0x1"),
+        ("forkchoice_updated", "0x1"),
+    ]
+    with open(csv_path) as f:
+        rows = list(csv.DictReader(f))
+    # Landed via the poll: distinguishable from a block that never imported,
+    # with the wait recorded separately from the final FCU latency.
+    assert rows[0]["status"] == "SYNCING_LANDED"
+    assert rows[0]["sync_wait_ms"] != ""
+    assert rows[0]["fcu_ms"] != ""
+
+
+def test_replay_driver_fcu_wait_timeout_aborts(monkeypatch):
+    """A block stuck on SYNCING past fcu_wait_seconds aborts the replay."""
+    monkeypatch.setattr(drivers.time, "sleep", lambda *_: None)
+    engine = _FakeEngine(["SYNCING"])
+    engine.forkchoice_updated = lambda head, **kw: {"payloadStatus": {"status": "SYNCING"}}
+    with pytest.raises(RuntimeError, match="stuck on SYNCING"):
+        ReplayDriver(engine, [_record("0x1", 1)], fcu_wait_seconds=0.0).run()
+
+
 def test_replay_driver_no_advance_head():
     engine = _FakeEngine(["VALID", "VALID"])
     records = [_record("0x1", 1), _record("0x2", 2)]

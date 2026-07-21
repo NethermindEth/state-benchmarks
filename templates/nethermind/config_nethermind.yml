@@ -5,7 +5,7 @@
 #   - clients: ["nethermind"], consensus_mode: "none" — the bloatnet snapshot is
 #     already at head, so we REPLAY (run_benchmark.sh / mock_cl directly), not
 #     pivot-sync; keeping consensus_mode none stops the runner touching the CL.
-#   - rpc_url on :8547 (geth-x35-target owns host 8545/8551).
+#   - rpc_url on :8547 (avoids anything already on host 8545/8551).
 #   - disk_iops_peak / disk_throughput_peak wrapped in sum() so the aggregator
 #     records the device-aggregate peak, not an arbitrary per-device series.
 
@@ -33,7 +33,7 @@ nodes:
     erigon: "/home/erigon/.local/share/erigon"
 
 metrics:
-  # Fallback only — PROMETHEUS_PORT/PROMETHEUS_URL from .env.neth take precedence.
+  # Fallback only — PROMETHEUS_PORT/PROMETHEUS_URL from .env.nethermind take precedence.
   prometheus_url: "http://localhost:9092"
   sync_window: "1h"
   load_window: "5m"
@@ -58,9 +58,13 @@ metrics:
       block_proc_p99: "histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
       gas_per_sec: "rate(nethermind_blocks_gas_used[{window}])"
     geth:
-      block_proc_p50: 'chain_execution{quantile="0.5"} / 1e9'
-      block_proc_p95: 'chain_execution{quantile="0.95"} / 1e9'
-      block_proc_p99: 'chain_execution{quantile="0.99"} / 1e9'
+      # Geth emits go-metrics summaries, not histograms. chain_inserts = TOTAL
+      # block-import time; chain_execution is only the EVM-execution phase of it
+      # (~40-60% at bloatnet scale) — using it here understated geth block-proc
+      # by ~2x vs Nethermind's full-pipeline gauge (fixed 2026-07-10).
+      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
       gas_per_sec: "rate(chain_head_gas_used[{window}])"
 
   regression_threshold: 0.25
@@ -91,9 +95,9 @@ load_test:
   latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
   # Cross-client standard (matches templates/geth): 64 sits inside every
   # client's served recent-state window — geth pathdb serves only the last ~128
-  # blocks, the binding constraint. (Nethermind itself serves far more via
-  # FlatDb.MinReorgDepth=1024, but we standardize for apples-to-apples.) 5s
-  # refresh keeps pinned blocks fresh as the replay advances the head.
+  # blocks, and the compose caps Nethermind at FlatDb.MinReorgDepth=128 to keep
+  # memory bounded on long runs, so 64 stays safely inside both. 5s refresh
+  # keeps pinned blocks fresh as the replay advances the head.
   recent_block_window: 64
   min_pinned_window: 8
   block_window_refresh_sec: 5
@@ -111,8 +115,8 @@ load_test:
     - "0x06fdde03" # name()
 
 # Mock-CL replay (advances head under locust load). Read by run_benchmark.sh,
-# NOT by the orchestrator. Override via env vars in .env.neth (MOCK_CL_PAYLOADS,
-# MOCK_CL_JWT, MOCK_CL_ENGINE_URL, MOCK_CL_LATENCY_CSV).
+# NOT by the orchestrator. Override via env vars in .env.nethermind
+# (MOCK_CL_PAYLOADS, MOCK_CL_JWT, MOCK_CL_ENGINE_URL, MOCK_CL_LATENCY_CSV).
 mock_cl:
   payloads: ""
   jwt: ""

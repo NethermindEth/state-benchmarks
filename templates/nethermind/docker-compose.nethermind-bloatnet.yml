@@ -2,8 +2,8 @@
 #
 # Self-contained template — start_infra.sh (in this directory) brings this up
 # together with docker-compose.monitoring.yml and points it at
-# templates/neth/.env.neth. config_neth.yml in this directory has
-# infrastructure.manage: false so the orchestrator does NOT touch docker —
+# templates/nethermind/.env.nethermind. config_nethermind.yml in this directory
+# has infrastructure.manage: false so the orchestrator does NOT touch docker —
 # this script-managed stack is the canonical lifecycle.
 #
 # Conventions kept so the rest of the pipeline works unchanged:
@@ -20,15 +20,16 @@
 # P2P is fully disabled: the snapshot is the canonical state and the benchmark
 # advances head via the mock-CL engine-API replay, not from network peers.
 #
-# Snapshot isolation: when overlay.enabled is set in config_neth.yml,
+# Snapshot isolation: when overlay.enabled is set in config_nethermind.yml,
 # start_infra.sh mounts an overlayfs over the snapshot and exports
 # NETHERMIND_DB_PATH=<scratch>/merged, so the bind below points at the overlay
 # and the mock-CL replay's writes never mutate the pristine snapshot. The
 # snapshot is restored before every run. See src/orchestrator/overlay.py.
 #
 # Host paths default to the x3.5 snapshot layout; override the NETHERMIND_*
-# variables in templates/neth/.env.neth if the host layout differs. Host ports
-# avoid geth-x35-target (host-net 8545/8551): RPC 8547, engine 8552, metrics 6060.
+# variables in templates/nethermind/.env.nethermind if the host layout differs.
+# Host ports avoid anything already on 8545/8551 (e.g. another co-located node):
+# RPC 8547, engine 8552, metrics 6060.
 
 name: benchmark-clients
 
@@ -47,9 +48,11 @@ services:
       - TERM=xterm-256color
       - COLORTERM=truecolor
     volumes:
-      - ${NETHERMIND_DB_PATH:-/mnt/bigdata/neth-x35-24358000/mainnet}:/nethermind/data/nethermind_db/mainnet
+      - ${NETHERMIND_DB_PATH:-/mnt/bigdata/neth-x35-24358000-benchmark/mainnet}:/nethermind/data/nethermind_db/mainnet
       - ${NETHERMIND_CHAINSPEC_PATH:-/mnt/bigdata/cl-config/chainspec.json}:/chainspec.json:ro
-      - ${NETHERMIND_JWT_PATH:-./docker/jwtsecret}:/jwt:ro
+      # JWT is infrastructure, NOT snapshot data — the repo-tracked docker/jwtsecret,
+      # resolved relative to this compose file (same file the mock-CL replay uses).
+      - ${NETHERMIND_JWT_PATH:-../../docker/jwtsecret}:/jwt:ro
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8547}:8545"
       - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8552}:8551"
@@ -66,9 +69,12 @@ services:
       # Queryable historical-state window for FlatDb: eth_getStorageAt/eth_call
       # against a block older than this return "No state available"
       # (FlatDbManager.GatherReadOnlySnapshotBundle). The steady-state depth
-      # tracks MinReorgDepth, so raise both well above load_test.recent_block_window
-      # (1000) so Locust's pinned recent blocks don't age out as replay advances
-      # the head. Costs memory — each retained block keeps a state snapshot bundle.
+      # tracks MinReorgDepth. Each retained block keeps a state-snapshot bundle in
+      # memory, so deep windows are expensive: 1024/2048 caused unbounded RSS growth
+      # on long runs, hence the modest 128/256 here. The load test copes via
+      # config_nethermind.yml's small recent_block_window (64), frequent re-pinning
+      # (block_window_refresh_sec: 5) and the min_pinned_window "latest" fallback.
+      # Raise these only for a wider pinned window, and budget the memory for it.
       - --FlatDb.MinReorgDepth=128
       - --FlatDb.MaxReorgDepth=256
       - --Init.MemoryHint=8000000000

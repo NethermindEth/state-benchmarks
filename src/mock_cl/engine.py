@@ -5,6 +5,7 @@ Wraps ``engine_forkchoiceUpdatedV{1..3}``, ``engine_newPayloadV{1..4}`` and
 from payload contents so the same driver works across Paris..Prague forks.
 """
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -42,20 +43,48 @@ class EngineClient:
         self._id = 0
 
     def _rpc(self, method: str, params: List[Any]) -> Any:
-        """POST a JSON-RPC request; raise RuntimeError on HTTP/JSON-RPC error."""
+        """POST a JSON-RPC request; raise RuntimeError on HTTP/JSON-RPC error.
+
+        Retries on the server-side RPC timeout (-32002, e.g. geth's authrpc
+        30s write timeout on a slow newPayload). The client keeps executing
+        the request after answering -32002, so a retried call just blocks on
+        the chain lock and returns the real status once the block lands.
+        ``self.timeout`` is the total wall-clock budget for one call: each
+        retry's request timeout is capped to the remaining budget, so retries
+        never stretch a call past ~timeout. (-32002 is also the generic
+        "resource unavailable" JSON-RPC code, so a permanent error with that
+        code burns the budget before raising — the warning logs the error
+        message to make that diagnosable.)
+        """
         self._id += 1
         body = {"jsonrpc": "2.0", "method": method, "params": params, "id": self._id}
-        headers = {
-            "Authorization": f"Bearer {make_jwt(self.secret)}",
-            "Content-Type": "application/json",
-        }
-        response = requests.post(self.engine_url, json=body, headers=headers, timeout=self.timeout)
-        if response.status_code != 200:
-            raise RuntimeError(f"{method} HTTP {response.status_code}: {response.text}")
-        data = response.json()
-        if "error" in data and data["error"] is not None:
-            raise RuntimeError(f"{method} JSON-RPC error: {data['error']}")
-        return data.get("result")
+        start = time.monotonic()
+        while True:
+            headers = {
+                "Authorization": f"Bearer {make_jwt(self.secret)}",
+                "Content-Type": "application/json",
+            }
+            remaining = self.timeout - (time.monotonic() - start)
+            response = requests.post(
+                self.engine_url, json=body, headers=headers,
+                timeout=max(1.0, remaining),
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"{method} HTTP {response.status_code}: {response.text}")
+            data = response.json()
+            error = data.get("error")
+            if error is not None:
+                if error.get("code") == -32002 and time.monotonic() - start < self.timeout:
+                    logger.warning(
+                        "%s returned -32002 (%s) after %.0fs; treating as a "
+                        "server-side timeout and retrying",
+                        method, error.get("message") or "no message",
+                        time.monotonic() - start,
+                    )
+                    time.sleep(1)
+                    continue
+                raise RuntimeError(f"{method} JSON-RPC error: {error}")
+            return data.get("result")
 
     def forkchoice_updated(
         self,

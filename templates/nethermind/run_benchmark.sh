@@ -49,15 +49,16 @@ ENGINE_PORT="${CLIENT_ENGINE_PORT:-8551}"
 
 # Mock-CL replay knobs (all overridable via .env.<client>):
 #   MOCK_CL_PAYLOADS   JSONL file. Defaults to templates/<client>/payloads/<milestone>.jsonl.
-#   MOCK_CL_JWT        Secret path or 0x-hex. Defaults to ${GETH_DB_PATH}/jwt.hex (same file
-#                      the geth container mounts at /data/jwt.hex).
+#   MOCK_CL_JWT        Secret path or 0x-hex. Defaults to NETHERMIND_JWT_PATH, falling back
+#                      to the repo-tracked docker/jwtsecret (the same file the compose mounts
+#                      into the nethermind container at /jwt).
 #   MOCK_CL_ENGINE_URL Engine API URL. Defaults to http://localhost:${ENGINE_PORT}.
 #   MOCK_CL_LATENCY_CSV Per-block latency CSV. Defaults to benchmarks/<milestone>/replay_latency.csv.
 #   MOCK_CL_ENGINE_TIMEOUT Per-request Engine-API timeout (s). Defaults to 60 — heavy x3.5
-#                      blocks can take >10s to process; the old 10s default killed the replay
-#                      on a single slow newPayload (see benchmarks/neth-x35-10k-30m/REPORT.md).
+#                      blocks can take >10s to process; a 10s default killed the replay
+#                      on a single slow newPayload in past long runs.
 DEFAULT_PAYLOADS="$SCRIPT_DIR/payloads/${MILESTONE}.jsonl"
-DEFAULT_JWT="${NETHERMIND_JWT_PATH:-./docker/jwtsecret}"
+DEFAULT_JWT="${NETHERMIND_JWT_PATH:-docker/jwtsecret}"
 MOCK_CL_PAYLOADS="${MOCK_CL_PAYLOADS:-$DEFAULT_PAYLOADS}"
 MOCK_CL_JWT="${MOCK_CL_JWT:-$DEFAULT_JWT}"
 MOCK_CL_ENGINE_URL="${MOCK_CL_ENGINE_URL:-http://localhost:${ENGINE_PORT}}"

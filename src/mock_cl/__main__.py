@@ -54,6 +54,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_replay.add_argument("--newpayload-version", type=int, default=None,
                           help="Force engine_newPayload version for all records (e.g. 4 for Prague); "
                                "default: per-record/auto")
+    p_replay.add_argument("--fcu-wait-seconds", type=float, default=600.0,
+                          help="How long to poll forkchoiceUpdated for a SYNCING (async-queued) "
+                               "block to land before aborting the replay. Separate from "
+                               "--engine-timeout, which bounds a single request.")
 
     p_record = sub.add_parser("record", help="Record blocks from a live EL into a JSONL payload file")
     p_record.add_argument("--source-rpc", required=True, help="Source EL JSON-RPC URL")
@@ -92,6 +96,7 @@ def _run_replay(args, engine: EngineClient) -> dict:
         count=args.count,
         latency_csv=args.latency_csv,
         newpayload_version=args.newpayload_version,
+        fcu_wait_seconds=args.fcu_wait_seconds,
     )
     return driver.run()
 

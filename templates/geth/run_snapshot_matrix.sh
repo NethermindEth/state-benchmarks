@@ -44,7 +44,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # ---- per-client defaults (dir alias, dir suffix, DB subdir, DB bind env var) --
 # Snapshot dir naming: "<alias>-<label>-<block>-benchmark" for both clients
-# (unified convention; see the snapshot-naming memory).
+# (unified convention across clients).
 #   DEFAULT_SUBDIR       = where the DB lives INSIDE the snapshot dir (the value
 #                          set as overlay.lowerdir / <client>_DB_PATH).
 #   DEFAULT_FETCH_SUBDIR = subdir the snapshot tar is EXTRACTED into.

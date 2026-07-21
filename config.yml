@@ -56,7 +56,7 @@ metrics:
 
   # Per-client block-processing + gas/s queries. Metric names vary per client.
   # Verify against each client's /metrics endpoint before relying on the values.
-  # Missing metrics return 0.0 from the aggregator (logged, not fatal).
+  # Metrics with no data are logged and omitted from the output (not fatal).
   client_queries:
     nethermind:
       block_proc_p50: 'histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
@@ -64,9 +64,12 @@ metrics:
       block_proc_p99: 'histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
       gas_per_sec:    'rate(nethermind_blocks_gas_used[{window}])'
     geth:
-      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(chain_execution_seconds_bucket[{window}])) by (le))'
-      block_proc_p95: 'histogram_quantile(0.95, sum(rate(chain_execution_seconds_bucket[{window}])) by (le))'
-      block_proc_p99: 'histogram_quantile(0.99, sum(rate(chain_execution_seconds_bucket[{window}])) by (le))'
+      # Geth emits go-metrics summaries, not histograms — histogram_quantile()
+      # returns empty against them. chain_inserts = TOTAL block-import time in
+      # nanoseconds (chain_execution is only the EVM phase, ~2x understated).
+      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
       gas_per_sec:    'rate(chain_head_gas_used[{window}])'
     besu:
       block_proc_p50: 'histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
@@ -149,10 +152,11 @@ load_test:
 # snapshot has no live CL, so this drives it directly. See src/mock_cl.
 # NOTE: for Nethermind targets, --Sync.StaticSnapPivot (nethermind#11943) is the
 # native alternative to pivot mode — set consensus_mode: none and pass that flag.
+# The orchestrator always launches the PIVOT driver here (replay is launched by
+# the templates' run_benchmark.sh, or run `python -m mock_cl replay` directly).
 mock_cl:
   engine_url: "http://localhost:8551"   # EL Engine API endpoint (authrpc)
   jwt: ""                                # path to jwt.hex OR a raw 0x/hex secret
-  mode: "pivot"                          # "pivot" (snap-sync) | "replay" (execution)
   pivot:
     hash: ""                             # frozen pivot block hash (0x...)
     number: null                         # frozen pivot block number (optional)

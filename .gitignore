@@ -1,12 +1,23 @@
 # OpenCode / AI Artifacts
 .omo/
+.claude/
+CLAUDE.md
+fable.md
 
 # Benchmarks Artifacts
 benchmarks/
 
-# Local environment overrides (committed: .env.example)
+# Local analysis / investigation artifacts (gcdumps, notes)
+memory-investigation/
+
+# Replay payload data (multi-GB JSONL/bin, staged per snapshot block)
+payloads_*
+
+# Local environment overrides (committed: .env.example, templates/*/.env.<client>)
 .env
 .env.local
+/.env.geth
+/.env.nethermind
 
 # Virtual Environments
 .venv/

@@ -1,0 +1,79 @@
+# Geth bloatnet node backed by a pre-synced snapshot on the host's disk.
+# Point the orchestrator at this file via infrastructure.compose_paths.clients
+# and list "geth" in nodes.clients; the runner then starts it with
+# `docker compose up -d geth` like any other client.
+#
+# Framework conventions kept so the rest of the pipeline works unchanged:
+#   - service name "geth"              -> Prometheus scrape target geth:6060
+#   - container benchmark_geth         -> cAdvisor queries + runner's du-based DB sizing
+#   - shared benchmark_net network     -> monitoring stack can reach the node
+#
+# Host paths default to /mnt/bigdata/snapshots; override the GETH_* variables
+# in the repo-root .env if the host layout differs. The snapshot directory must
+# contain jwt.hex at its root (Geth expects --authrpc.jwtsecret=/data/jwt.hex).
+# Host ports follow the usual BIND_ADDR/CLIENT_*_PORT variables — if another
+# node already owns 8545/8551 on the host, set e.g. CLIENT_RPC_PORT=8547 and
+# CLIENT_ENGINE_PORT=8552 in .env (and match nodes.rpc_url in the config).
+#
+# Sync and P2P are fully disabled to keep the node frozen on the snapshot:
+#   --maxpeers=0      no inbound/outbound peer slots
+#   --nodiscover      disable UDP discovery
+#   --port=0          do not listen on the P2P TCP port
+
+name: benchmark-clients
+
+networks:
+  default:
+    name: benchmark_net
+
+services:
+  geth:
+    image: ${GETH_IMAGE:-docker.ethquokkaops.io/dh/ethpandaops/geth:master}
+    container_name: benchmark_geth
+    tty: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+    volumes:
+      - ${GETH_DB_PATH:-/mnt/bigdata/snapshots}:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_WS_PORT:-8546}:8546"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${GETH_METRICS_PORT:-6060}:6060" # Metrics
+    command:
+      - --datadir=/data
+      - --networkid=${GETH_NETWORK_ID:-12159}
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3,debug,admin
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=eth,net,web3,debug,txpool,engine
+      - --ws.origins=*
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=*
+      - --authrpc.jwtsecret=/data/jwt.hex
+      - --syncmode=full
+      - --gcmode=archive
+      - --cache=4096
+      - --miner.gaslimit=1000000000
+      - --txpool.globalqueue=10000
+      - --txpool.globalslots=10000
+      - --override.osaka=1864841831
+      - --override.bpo1=1864841831
+      - --override.bpo2=1864841831
+      - --maxpeers=0
+      - --nodiscover
+      - --port=0
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+      - --verbosity=${GETH_LOG_VERBOSITY:-3}

@@ -35,11 +35,12 @@ metrics:
     test-client:
       # Geth exposes go-metrics summaries with pre-computed quantile labels —
       # not Prometheus histograms — so we read the quantile directly.
-      # chain_execution is in nanoseconds; convert to seconds for parity with
-      # the histogram-based client queries elsewhere.
-      block_proc_p50: 'chain_execution{quantile="0.5"} / 1e9'
-      block_proc_p95: 'chain_execution{quantile="0.95"} / 1e9'
-      block_proc_p99: 'chain_execution{quantile="0.99"} / 1e9'
+      # chain_inserts = TOTAL block-import time in nanoseconds (chain_execution
+      # is only the EVM phase of it, ~2x understated); convert to seconds for
+      # parity with the histogram-based client queries elsewhere.
+      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
       # chain_mgasps is mega-gas per second already; multiply for gas/s.
       gas_per_sec:    'chain_mgasps{quantile="0.5"} * 1e6'
 

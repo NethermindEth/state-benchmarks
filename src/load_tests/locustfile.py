@@ -201,6 +201,13 @@ def _block_window_refresher(environment, host: str):
     window pinned once at test start decays into "No state available" errors
     over the run. If the band shrinks below MIN_PINNED_WINDOW mid-run, fall
     back to the "latest" tag for the remainder.
+
+    In the "latest"-tag fallback modes the thread only tracks the head gauge —
+    it must still run, or locust_current_block_number freezes at the initial
+    head and the Grafana "Block number (target node)" panel shows no advance
+    even while the replay moves the head. The mode is derived from
+    RECENT_BLOCKS itself each tick, so no fallback path can forget to disable
+    re-pinning.
     """
     global RECENT_BLOCKS, LATEST_HEAD_BLOCK
     while getattr(environment.runner, "state", None) in ("spawning", "running", "ready"):
@@ -209,6 +216,8 @@ def _block_window_refresher(environment, host: str):
             head = _fetch_head(host)
             LATEST_HEAD_BLOCK = head
             LOCUST_CURRENT_BLOCK.set(head)
+            if RECENT_BLOCKS == ["latest"]:
+                continue
             window, depth, edge_found = _compute_block_window(host, head)
             if edge_found and window < MIN_PINNED_WINDOW:
                 _logger.warning(
@@ -216,7 +225,7 @@ def _block_window_refresher(environment, host: str):
                     "switching to the 'latest' tag for the remainder."
                 )
                 RECENT_BLOCKS = ["latest"]
-                return
+                continue
             RECENT_BLOCKS = [hex(head - i) for i in range(window)]
         except Exception as e:
             _logger.warning(f"Block window refresh failed (keeping previous window): {e}")
@@ -370,11 +379,15 @@ def on_test_start(environment, **kwargs):
                     f"Initialized recent-block window: head={head}, window={window} "
                     f"(refreshing every {BLOCK_WINDOW_REFRESH_SEC:g}s)"
                 )
-                threading.Thread(
-                    target=_block_window_refresher,
-                    args=(environment, host),
-                    daemon=True,
-                ).start()
+
+    # Always run the refresher — including the head-fetch-failure fallback
+    # above. In the "latest" modes it only keeps the locust_current_block_number
+    # gauge tracking the head; it derives pin-vs-latest from RECENT_BLOCKS.
+    threading.Thread(
+        target=_block_window_refresher,
+        args=(environment, host),
+        daemon=True,
+    ).start()
 
     if PROOF_SIZES_CSV:
         os.makedirs(os.path.dirname(PROOF_SIZES_CSV) or ".", exist_ok=True)

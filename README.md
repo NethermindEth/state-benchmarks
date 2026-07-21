@@ -2,9 +2,13 @@
 
 Benchmark Ethereum execution clients - Nethermind, Geth, Besu, Reth, Erigon - under a realistic, repeatable workload
 
-The framework drives a node through a full cycle (mount snapshot, start node, wait untill RPC is avaible, start test, stop the node) and produces a comparable report at the end (json/csv reports and grafana).
+The framework drives a node through a full cycle (mount snapshot, start node, wait until RPC is available, run the load test, stop the node) and produces a comparable report at the end (JSON/CSV reports and Grafana).
 
 Everything is configuration-driven and runs locally with Docker. A pre-provisioned Grafana dashboard shows every metric live while the benchmark runs.
+
+## Why?
+
+Ethereum's scaling roadmap raises the gas limit, and with it the rate at which state grows. Client teams need to know how execution clients hold up when state is several times today's mainnet — but as of mid-2026 there is no off-the-shelf tool that measures this end-to-end. Existing benchmarks either time isolated EVM execution or watch a live sync; none drive a client that sits on bloated (e.g. [bloatnet / perf-devnet-3](https://github.com/ethpandaops)) state through a realistic combined workload — snap-sync to a frozen pivot, block execution advanced by a (mock) consensus layer, and a read-heavy JSON-RPC load — while collecting comparable resource and latency metrics across clients and milestones. This framework fills that gap: same snapshot, same blocks, same load, repeatable per run (overlayfs keeps the snapshot pristine), with regression detection between runs.
 
 ## How it works
 
@@ -25,9 +29,9 @@ For the full phase-by-phase walkthrough (sync → execution → load → reporti
 * [**uv**](https://github.com/astral-sh/uv) — fast Python package manager.
 * **Docker** with **Docker Compose**.
 
-### Consensus client (requires for sync test)
+### Consensus client (required for sync tests)
 
-Post-merge, no execution client can sync mainnet on its own — a consensus client must drive its Engine API. `docker/docker-compose.clients.yml` ships a checkpoint-synced `lighthouse-<client>` beacon node for each EL client, sharing `docker/jwtsecret` for Engine-API auth. When `nodes.consensus: true` (the default), the orchestrator starts the matching beacon node automatically. Set it to `false` for nodes that are already synced or driven externally.
+Post-merge, no execution client can sync mainnet on its own — a consensus client must drive its Engine API. `docker/docker-compose.clients.yml` ships a checkpoint-synced `lighthouse-<client>` beacon node for each EL client, sharing `docker/jwtsecret` for Engine-API auth. When `nodes.consensus: true` (as the shipped `config.yml` sets; the code default with the key omitted is `false`), the orchestrator starts the matching beacon node automatically. Set it to `false` for nodes that are already synced or driven externally.
 
 `docker/jwtsecret` is a committed local-only secret. If you ever expose these ports, regenerate it:
 
@@ -49,13 +53,19 @@ uv sync
 | `src/load_tests/locustfile.py`         | Locust workload (random recent blocks, proof-size capture).        |
 | `src/metrics/aggregator.py`            | Prometheus + Locust → per-run JSON/CSV + regression check.         |
 | `src/orchestrator/overlay.py`          | Optional overlayfs wrapper keeping a snapshot DB pristine per run.  |
+| `src/mock_cl/`                         | Mock consensus layer: pivot (snap-sync) + replay (execution) drivers.|
 | `config.yml` / `remote-config.yml`     | Production configs (local clients / remote node).                  |
+| `config_geth.yml` / `config_nethermind.yml` | Runner configs for the snapshot-backed `docker/` composes below. |
 | `test-config.yml`                      | Config for the local Geth `--dev` smoke stack.                     |
 | `docker/docker-compose.clients.yml`    | Real-client compose (Nethermind/Geth/Besu/Reth/Erigon).           |
 | `docker/docker-compose.monitoring.yml` | Prometheus + cAdvisor + node_exporter + Grafana (production stack).|
 | `docker/docker-compose.test.yml`       | Self-contained Geth-dev test stack (single shared network).        |
+| `docker/docker-compose.geth-bloatnet.yml` / `…nethermind-mainnet.yml` | Snapshot-backed single-client composes (pre-synced DB on disk). |
 | `docker/grafana/`                      | Auto-provisioned Prometheus datasource + `Benchmark` dashboard.    |
+| `templates/<client>/`                  | Self-contained script-managed benchmark stacks (see below).        |
 | `scripts/seed_test_node.py`            | Idempotent state seeder for the test stack.                        |
+| `scripts/fetch_snapshot.sh`            | Detached snapshot download + extract (used by the matrix sweep).   |
+| `scripts/rlp_to_mocks.py`              | RLP payload stream → mock-CL JSONL converter.                      |
 | `tests/`                               | `unit/` (no Docker) and `integration/` (uses the test stack).      |
 | `docs/architecture.md`                 | Phase-by-phase architecture detail.                                |
 | `benchmarks/<milestone>/`              | Output of every run; the comparator scans siblings under here.     |
@@ -100,7 +110,7 @@ load_test:
 
 **Gas-paying tasks (`load_test.gas_tests_enabled`)** — tasks tagged `gas` (currently `eth_sendTransaction`, a 1-wei transfer to a random configured address) **spend real gas** and need an unlocked account on the node. The locustfile grabs the first `eth_accounts` entry at startup and, if there is none, logs a warning and the tasks become no-ops. This is off by default.
 
-> **Per-client metric names:** the `client_queries` differ across clients and versions, so verify them against each client's `/metrics` endpoint. Missing metrics return `0.0` (logged, not fatal), so the harness keeps running.
+> **Per-client metric names:** the `client_queries` differ across clients and versions, so verify them against each client's `/metrics` endpoint. Metrics that return no data are logged and **omitted** from the output (never recorded as `0.0`), and the harness keeps running.
 
 ### Ports, images, and credentials: `.env`
 
@@ -120,6 +130,7 @@ Three `.env` variables do more than set ports/images:
 * **`ETH_NETWORK`** — the network for the whole client stack (EL chain flags *and* Lighthouse), e.g. `sepolia`. Defaults to `mainnet` in the compose file.
 * **`CHECKPOINT_SYNC_URL`** — Lighthouse checkpoint-sync endpoint; must match `ETH_NETWORK` (e.g. `https://sepolia.beaconstate.info` for sepolia).
 * **`CONSENSUS`** — read by `runner.py` (not compose); overrides `nodes.consensus`, i.e. whether the matching beacon node starts alongside the EL client. Set `CONSENSUS=false` for pre-synced or externally-driven nodes.
+* **`PROMETHEUS_URL` / `PROMETHEUS_PORT`** — read by the aggregator and take precedence over `metrics.prometheus_url` in the config. The per-client templates set `PROMETHEUS_PORT=9092` in their `.env.<client>`, so the aggregator follows the remapped monitoring stack automatically.
 
 Every variable uses `${VAR:-default}`, so leaving one unset keeps today's defaults. **All published ports bind to `127.0.0.1` by default** — set `BIND_ADDR=0.0.0.0` in `.env` to expose JSON-RPC / Prometheus / Grafana beyond the host. **Don't do this on shared or public machines:** anonymous Grafana, default admin credentials, and an open execution-client RPC are not safe to expose. Container names (`benchmark_*`), volume names, chain selection, and Grafana auth/theme flags stay hardcoded — edit the compose files directly to change them.
 
@@ -127,7 +138,7 @@ Every variable uses `${VAR:-default}`, so leaving one unset keeps today's defaul
 
 ### Notes on metric sources
 
-* **Geth** exposes go-metrics summaries with `{quantile="…"}` labels — *not* Prometheus histograms (`*_bucket`). Query the quantile directly: `chain_execution{quantile="0.95"} / 1e9` (the raw value is nanoseconds). `histogram_quantile()` returns empty against Geth. See `test-config.yml` for a working example.
+* **Geth** exposes go-metrics summaries with `{quantile="…"}` labels — *not* Prometheus histograms (`*_bucket`). Query the quantile directly: `chain_inserts{quantile="0.95"} / 1e9` (the raw value is nanoseconds). `histogram_quantile()` returns empty against Geth. Use `chain_inserts` (total block-import time), not `chain_execution` — the latter is only the EVM phase and understates block processing by ~2× versus Nethermind's full-pipeline metric. See `test-config.yml` for a working example.
 * **Locust exporter** runs in-process inside `locustfile.py` and binds `0.0.0.0:9646` on the host (override via `LOCUST_PROMETHEUS_PORT`). It is naturally DOWN whenever no benchmark is running.
 * **cAdvisor on rootless Docker** (OrbStack and similar) can't register containers via its docker factory because the storage driver lacks the layer DB cAdvisor expects, which suppresses container metrics. The compose ships `cgroup: host` on the `cadvisor` service so its systemd factory still sees docker cgroups by `id`; setting `DOCKER_SOCK=/dev/null` disables the broken docker factory. On Docker Desktop / rootful Linux, leave `DOCKER_SOCK` unset and `name=…` queries work normally.
 
@@ -163,7 +174,7 @@ Each run writes into `benchmarks/<milestone>/`:
 benchmarks/
 └── v1.0.0/
     ├── sync_metrics_nethermind.json       # sync_time_sec + db_size_bytes
-    ├── sync_phase_metrics_nethermind.json # Prometheus snapshot over sync_window (taken right after sync)
+    ├── sync_phase_metrics_nethermind.json # Prometheus snapshot over sync_window (only when the sync phase ran, i.e. not --skip-sync)
     ├── metrics_nethermind.json            # full structured output
     ├── metrics_nethermind.csv             # flat per-metric CSV
     └── nethermind/
@@ -173,6 +184,8 @@ benchmarks/
         ├── locust_stats_exceptions.csv
         └── proof_sizes.csv                # response bytes per eth_getProof call
 ```
+
+Template runs (`templates/<client>/run_benchmark.sh`) additionally write `replay_latency.csv` (per-block `new_payload_ms` / `fcu_ms` / `sync_wait_ms` / status from the mock-CL replay, flushed after every block) and `mock_cl_replay.log` into the same `benchmarks/<milestone>/` directory.
 
 `metrics_<client>.json` looks like:
 
@@ -262,12 +275,12 @@ Tear-down: `docker compose -f docker/docker-compose.test.yml down -v` (or rerun 
 
 ## Mock consensus layer
 
-Post-merge EL clients only snap-sync or execute blocks when a consensus client drives their Engine API. `src/mock_cl` is a minimal Engine-API "mock CL" that supplies exactly the two functions [issue #21](https://github.com/marcindsobczak/state-benchmarks/issues/21) needs, with no extra dependencies (stdlib + `requests`; the HS256 JWT is hand-rolled).
+Post-merge EL clients only snap-sync or execute blocks when a consensus client drives their Engine API. `src/mock_cl` is a minimal Engine-API "mock CL" that supplies exactly the two functions [issue #21](https://github.com/NethermindEth/state-benchmarks/issues/21) needs, with no extra dependencies (stdlib + `requests`; the HS256 JWT is hand-rolled).
 
 It has two modes:
 
 * **pivot** (snap-sync benchmarks) — repeatedly sends `engine_forkchoiceUpdatedV` with `headBlockHash = safeBlockHash = finalizedBlockHash` set to a fixed frozen pivot hash, every ~12s. That single repeated FCU points a post-merge EL (Geth/Besu/Reth/Erigon) at the frozen block so it snap-syncs to that state. Unlocks the #21 snap-sync metrics: **sync wall time, network bandwidth, disk IOPS, RSS, on-disk DB size**.
-* **replay** (execution-under-head benchmarks) — for each recorded block, sends `engine_newPayloadV{1..4}` then `engine_forkchoiceUpdatedV{1..3}` to advance the head, measuring per-block processing latency. Unlocks the #21 execution metrics: **block-processing p50/p95/p99, gas/s, RSS growth**.
+* **replay** (execution-under-head benchmarks) — for each recorded block, sends `engine_newPayloadV{1..4}` then `engine_forkchoiceUpdatedV{1..3}` to advance the head, measuring per-block processing latency. Unlocks the #21 execution metrics: **block-processing p50/p95/p99, gas/s, RSS growth**. Bloat-scale blocks the EL queues asynchronously (`newPayload` → `SYNCING`) are polled via FCU until they land (`--fcu-wait-seconds`, default 600 s per block); the wait is recorded as a separate `sync_wait_ms` CSV column so the FCU latency percentiles stay comparable across clients. The engine client also retries a server-side `-32002` RPC timeout within its request budget (e.g. Geth's 30 s authrpc write timeout on a slow `newPayload`), and the latency CSV is flushed atomically after every block so a killed run keeps its rows.
 
 ### CLI
 
@@ -315,15 +328,10 @@ nodes:
 mock_cl:
   engine_url: "http://localhost:8551"
   jwt: ""                 # path to jwt.hex OR a raw 0x/hex secret
-  mode: "pivot"           # "pivot" | "replay"
-  pivot:
+  pivot:                  # the orchestrator always runs the pivot driver;
     hash: ""              # frozen pivot block hash
-    number: null
-    interval: 12
-  replay:
-    payloads: ""
-    count: null
-    latency_csv: ""
+    number: null          # (replay is launched by the templates'
+    interval: 12          #  run_benchmark.sh or `-m mock_cl replay` directly)
 ```
 
 Back-compat: if `consensus_mode` is unset, the legacy boolean applies (`consensus: true` → lighthouse, `false` → none). `CONSENSUS_MODE` in the environment or repo-root `.env` overrides the config. With `consensus_mode: "mock"`, the orchestrator starts the EL only (no Lighthouse) and launches the pivot driver in the background so the frozen target snap-syncs; it's terminated on tear-down.
@@ -345,7 +353,7 @@ The container reads and writes through `merged`; restoring the snapshot is just 
 
 Both run flows use the same module and config:
 
-* **Orchestrator-managed** (`infrastructure.manage: true`): `runner.py` mounts the overlay before `compose up` (SSH-aware — it runs wherever Docker runs), repoints the client's DB bind variable at the merged dir, and tears it down on exit.
+* **Orchestrator-managed** (`infrastructure.manage: true`): `runner.py` mounts the overlay before `compose up` (SSH-aware — it runs wherever Docker runs) and repoints the client's DB bind variable at the merged dir. The overlay is unmounted together with the rest of the stack — i.e. on `--stop-monitoring`; a default run leaves it mounted for post-mortem inspection, and the next run's `up` restores it to pristine anyway.
 * **Template-managed** (`infrastructure.manage: false`): the template `start_infra.sh` scripts own the lifecycle, mounting on start and unmounting on `down`.
 
 Configure it under a top-level `overlay:` block. It is **disabled by default**, in which case the raw snapshot is bind-mounted exactly as before.
@@ -383,12 +391,25 @@ Each `templates/<client>/` is a **self-contained, script-managed stack** for ben
 
 `run_benchmark.sh` launches the mock-CL **replay** in the background (advancing the head under load) whenever `MOCK_CL_PAYLOADS` resolves to a file; otherwise replay is skipped with a warning.
 
+### Snapshot matrix (`run_snapshot_matrix.sh`)
+
+To sweep several snapshots (state sizes / starting blocks) in one unattended session, each template ships `run_snapshot_matrix.sh`. For every snapshot listed in a manifest it: stops the node and overlay, downloads and extracts the snapshot (`scripts/fetch_snapshot.sh`), repoints the DB path / `overlay.lowerdir` / mock-CL payloads, then runs the benchmark at one or more durations (each from a freshly restored pristine overlay) before tearing down and freeing the disk.
+
+```bash
+cp templates/nethermind/snapshots.txt.example templates/nethermind/snapshots.txt   # then edit
+# Launch detached — a full matrix runs for many hours and must survive disconnect:
+nohup setsid bash -c './templates/nethermind/run_snapshot_matrix.sh templates/nethermind/snapshots.txt; \
+  echo MATRIX-DONE-rc=$?' > matrix_driver.log 2>&1 &
+```
+
+The manifest has one `<snapshot_url> [payloads_file]` per line (see `snapshots.txt.example`); replay payload files are pre-staged per block — the first payload must be the snapshot block + 1, otherwise that snapshot is skipped loudly. Every knob is env-overridable (`DURATIONS="5m 60m"`, `SNAP_BASE=/mnt/bigdata`, `KEEP_SNAPSHOTS`, `SKIP_FETCH`, … — see the header of the script). Each snapshot × duration run lands in `benchmarks/<alias>-<label>-<block>-<duration>/` (e.g. `neth-x35-24358000-60m`), and a per-run status summary is printed at the end of `matrix_driver.log`.
+
 * **`templates/geth/`** — Geth bloatnet snapshot (snap-synced; no `--syncmode`/`--gcmode` pinning).
-* **`templates/neth/`** — Nethermind on the x3.5 bloatnet snapshot (mainnet shadowfork: chainId 1, p2p `--Init.NetworkId=12159`, FlatDb). The image **must** match the one that wrote the snapshot's FlatDb state, and the chainspec is mounted from the host. Ports avoid a co-located host-net Geth (RPC 8547 / engine 8552 / metrics 6060). Run `runner.py` with `--client nethermind` (the framework key; the directory is `neth` only for the path).
+* **`templates/nethermind/`** — Nethermind on the x3.5 bloatnet snapshot (mainnet shadowfork: chainId 1, p2p `--Init.NetworkId=12159`, FlatDb). The image **must** match the one that wrote the snapshot's FlatDb state, and the chainspec is mounted from the host. Ports avoid a co-located host-net Geth (RPC 8547 / engine 8552 / metrics 6060).
 
 > **cAdvisor on the containerd image store:** where Docker uses the containerd snapshotter (`Storage Driver: overlayfs`), stock cAdvisor (≤ v0.52) emits no `name="benchmark_*"` series, so the Grafana **Client** variable is empty and every per-container CPU/RSS/disk/net query returns nothing. Build the patched image once (`docker build -t cadvisor-layerdb-fix:v0.49.1 docker/cadvisor`) and set `CADVISOR_IMAGE=cadvisor-layerdb-fix:v0.49.1` in `.env.<client>` — no dockerd restart needed.
 
-> **Load-testing a replay-driven node:** a load test that pins *recent* blocks will hit `-32002 No state available` if the node keeps only a shallow state window and replay advances the head faster than `load_test.block_window_refresh_sec`. For **FlatDb** nodes the queryable window tracks `--FlatDb.MinReorgDepth` (default 128) up to `--FlatDb.MaxReorgDepth` (default 256) — raise both above `load_test.recent_block_window` (the neth template uses `1024`/`2048` for a 1000-block window; this costs memory, one state-snapshot bundle per retained block, and the deeper retention only applies to blocks processed *after* the change). As a client-agnostic fallback, set `load_test.min_pinned_window` above the node's servable band to query `latest` instead, and/or bound replay with `--count`.
+> **Load-testing a replay-driven node:** a load test that pins *recent* blocks will hit `-32002 No state available` if the node keeps only a shallow state window and replay advances the head faster than `load_test.block_window_refresh_sec`. For **FlatDb** nodes the queryable window tracks `--FlatDb.MinReorgDepth` (default 128) up to `--FlatDb.MaxReorgDepth` (default 256) — raise both above `load_test.recent_block_window` (this costs memory — one state-snapshot bundle per retained block, which is why the nethermind template keeps the defaults and uses a small `recent_block_window: 64` instead; `1024`/`2048` caused unbounded RSS growth on hour-long bloatnet runs — and the deeper retention only applies to blocks processed *after* the change). As a client-agnostic fallback, set `load_test.min_pinned_window` above the node's servable band to query `latest` instead, and/or bound replay with `--count`.
 
 ## Testing
 

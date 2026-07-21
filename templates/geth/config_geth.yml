@@ -5,9 +5,9 @@
 #   - prometheus_url is the fallback only. The aggregator prefers the
 #     PROMETHEUS_PORT (or PROMETHEUS_URL) env var that .env.geth already sets,
 #     so this stays in sync with the scripts. On hosts where an unrelated
-#     Prometheus owns :9090, the benchmark stack is mapped elsewhere (the
-#     reference host uses :9092); pointing the aggregator at :9090 there hits
-#     the wrong server and silently drops every cAdvisor metric.
+#     Prometheus owns :9090, the benchmark stack is mapped elsewhere (:9092 in
+#     .env.geth); pointing the aggregator at :9090 there hits the wrong server
+#     and silently drops every cAdvisor metric.
 #   - disk_iops_peak / disk_throughput_peak wrapped in sum() so the aggregator
 #     records the device-aggregate peak, not an arbitrary per-device series
 
@@ -20,8 +20,8 @@ infrastructure:
     clients: "templates/geth/docker-compose.geth-bloatnet.yml"
 
 nodes:
-  # Geth RPC host port (matches CLIENT_RPC_PORT in .env.geth; 8549 avoids the
-  # host-net geth-x35-target on 8545).
+  # Geth RPC host port (matches CLIENT_RPC_PORT in .env.geth; 8549 avoids
+  # clashing with anything already on 8545 on the host).
   rpc_url: "http://localhost:8549"
   consensus: false
   # The orchestrator's built-in mock-CL auto-start is pivot-only (snap-sync
@@ -69,10 +69,16 @@ metrics:
       block_proc_p99: "histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
       gas_per_sec: "rate(nethermind_blocks_gas_used[{window}])"
     geth:
-      # Geth emits go-metrics summaries, not histograms — chain_execution{quantile=…}.
-      block_proc_p50: 'chain_execution{quantile="0.5"} / 1e9'
-      block_proc_p95: 'chain_execution{quantile="0.95"} / 1e9'
-      block_proc_p99: 'chain_execution{quantile="0.99"} / 1e9'
+      # Geth emits go-metrics summaries, not histograms. chain_inserts = TOTAL
+      # block-import time; chain_execution is only the EVM-execution phase of it
+      # (~40-60% at bloatnet scale) — using it here understated geth block-proc
+      # by ~2x vs Nethermind's full-pipeline gauge (fixed 2026-07-10).
+      # NOTE: the first run after this switch shows a one-time ~2x block_proc
+      # jump vs milestones recorded with chain_execution — an expected metric
+      # correction, not a client regression (--fail-on-regression will trip).
+      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
       gas_per_sec: "rate(chain_head_gas_used[{window}])"
     besu:
       block_proc_p50: "histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
@@ -146,10 +152,11 @@ mock_cl:
   # Default: templates/geth/payloads/<milestone>.jsonl. Drop a CL-recorded
   # JSONL there; without it run_benchmark.sh skips replay and warns.
   payloads: ""
-  # JWT secret. .env.geth's GETH_DB_PATH/jwt.hex (the same file mounted into
-  # the geth container at /data/jwt.hex) is the default.
+  # JWT secret. Defaults to the repo-tracked docker/jwtsecret — the same file
+  # the compose mounts into the geth container at /jwt.
   jwt: ""
-  engine_url: "http://localhost:8551"
+  # run_benchmark.sh derives the real URL from CLIENT_ENGINE_PORT in .env.geth.
+  engine_url: "http://localhost:8552"
 
 # Overlayfs snapshot isolation (src/orchestrator/overlay.py). When enabled,
 # start_infra.sh stacks a Linux overlay on top of the pristine snapshot and
@@ -158,15 +165,15 @@ mock_cl:
 # snapshot. `start_infra.sh` restores before every run (and on `down`), so each
 # client can be benchmarked from the exact same starting block.
 #
-# Geth mounts the snapshot ROOT at /data (chaindata + jwt.hex), so lowerdir is
-# the whole GETH_DB_PATH directory. Requirements: Linux; mount privileges
+# Geth mounts the snapshot ROOT at /data (chaindata under geth/), so lowerdir
+# is the whole GETH_DB_PATH directory. Requirements: Linux; mount privileges
 # (sudo); scratch_dir on an xattr-capable fs (ext4/xfs) on the big disk with
 # room for the run's writes. Disabled by default (raw snapshot bind-mounted).
 overlay:
   enabled: true
-  # Read-only lower layer = the pristine snapshot datadir (matches GETH_DB_PATH;
-  # contains geth/ + jwt.hex). perf-devnet-3 geth @ block 24358000.
-  lowerdir: "/mnt/bigdata/geth-x35-24358000-snap"
+  # Read-only lower layer = the pristine snapshot datadir (must match
+  # GETH_DB_PATH in .env.geth). perf-devnet-3 geth @ block 24358000.
+  lowerdir: "/mnt/bigdata/geth-x35-24358000-benchmark"
   # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
   scratch_dir: "/mnt/bigdata/overlay/geth"
   # Compose bind var repointed at <scratch_dir>/merged when enabled.

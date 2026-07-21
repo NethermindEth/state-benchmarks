@@ -1,0 +1,138 @@
+infrastructure:
+  manage: true
+  ssh_command: "" # e.g. "ssh user@host", leave empty for local execution
+  compose_paths:
+    monitoring: "docker/docker-compose.monitoring.yml"
+    clients: "docker/docker-compose.nethermind-mainnet.yml"
+
+nodes:
+  rpc_url: "http://localhost:8547"
+  # Start a lighthouse-<client> consensus node alongside each EL client.
+  # Required for mainnet/sepolia sync (post-merge, EL clients only sync when a
+  # CL drives their engine API). Disable for pre-synced / externally-driven
+  # nodes. Overridable without editing this file via CONSENSUS=true|false in
+  # the repo-root .env (or the process environment).
+  consensus: false
+  # How long to wait for the client's JSON-RPC to come up after `docker compose up`.
+  rpc_startup_timeout_sec: 300
+  # Sync is only considered complete when eth_syncing is false AND the head
+  # block timestamp is at most this many seconds old (guards against clients
+  # reporting "not syncing" before sync has actually started).
+  sync_head_freshness_sec: 120
+  clients:
+    - "nethermind"
+  data_dirs:
+    nethermind: "/nethermind/data/nethermind_db/mainnet"
+    geth: "/root/.ethereum"
+    besu: "/opt/besu/data"
+    reth: "/root/.local/share/reth"
+    erigon: "/home/erigon/.local/share/erigon"
+
+metrics:
+  prometheus_url: "http://localhost:9092"
+  # Range windows used by {window} substitution in queries.
+  # sync_window covers the sync phase; load_window covers the load-test phase.
+  sync_window: "1h"
+  load_window: "5m"
+
+  # Cross-client container/host queries. {client} -> "benchmark_<client>",
+  # {window} -> sync_window or load_window depending on phase.
+  queries:
+    cpu_percent_peak: 'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    cpu_percent_sustained: 'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    rss_peak_bytes: 'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes: 'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec: 'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak: 'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    net_rx_bytes_per_sec_avg: 'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    disk_iops_peak: 'max_over_time((rate(container_fs_reads_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time((rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+
+  # Per-client block-processing + gas/s queries. Metric names vary per client.
+  # Verify against each client's /metrics endpoint before relying on the values.
+  # Missing metrics return 0.0 from the aggregator (logged, not fatal).
+  client_queries:
+    nethermind:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(nethermind_blocks_gas_used[{window}])"
+    geth:
+      # Geth emits go-metrics summaries, not histograms — histogram_quantile()
+      # returns empty against them. chain_inserts = TOTAL block-import time in
+      # nanoseconds (chain_execution is only the EVM phase, ~2x understated).
+      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
+      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
+      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
+      gas_per_sec: "rate(chain_head_gas_used[{window}])"
+    besu:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(besu_blockchain_chain_head_gas_used[{window}])"
+    reth:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6"
+    erigon:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(chain_head_gas_used[{window}])"
+
+  # Fraction by which a metric must change in the bad direction (lower for
+  # latency-style metrics, higher for throughput-style ones) before the
+  # aggregator flags it as a regression. 0.25 = 25%.
+  regression_threshold: 0.25
+
+  # Higher-is-better metrics. The aggregator's regression check flips sign for these.
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+    - "disk_throughput_peak_bytes_per_sec"
+    - "disk_iops_peak"
+    - "net_rx_bytes_per_sec_peak"
+    - "net_rx_bytes_per_sec_avg"
+
+load_test:
+  run_time: "5m"
+  users: 50
+  spawn_rate: 10
+  # Wait time between requests per simulated user (seconds).
+  wait_time:
+    min: 0.1
+    max: 0.5
+  # Gas-paying tasks (eth_sendTransaction) spend real gas and need an unlocked
+  # account on the node — only enable against dev/throwaway networks.
+  gas_tests_enabled: false
+  # Per-method task weights — Locust picks tasks weighted by these values.
+  task_weights:
+    eth_getBalance: 3
+    eth_getStorageAt: 3
+    eth_call: 2
+    eth_getCode: 2
+    eth_getProof: 1
+    eth_sendTransaction: 1 # only used when gas_tests_enabled is true
+  # Prometheus histogram buckets (milliseconds) for locust_request_latency_ms.
+  latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+  # How many recent blocks to sample from (calls hit random blocks in [head-N, head]).
+  recent_block_window: 1000
+  # If the node's servable band (after the safety margin) is shallower than
+  # this, pinned block numbers would go stale mid-run — fall back to "latest".
+  min_pinned_window: 8
+  # How often (seconds) to re-pin the block window to the advancing head.
+  block_window_refresh_sec: 30
+  addresses:
+    - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  slots:
+    - "0x0"
+    - "0x1"
+    - "0x2"
+  # Representative read-heavy eth_call shapes (ERC-20 style). Hex calldata only.
+  eth_call_shapes:
+    - "0x18160ddd" # totalSupply()
+    - "0x313ce567" # decimals()
+    - "0x95d89b41" # symbol()
+    - "0x06fdde03" # name()

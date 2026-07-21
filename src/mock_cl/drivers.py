@@ -7,6 +7,7 @@ live head and measures per-block latency.
 """
 import csv
 import logging
+import os
 import statistics
 import time
 from typing import Any, Dict, Iterable, List, Optional
@@ -127,6 +128,7 @@ class ReplayDriver:
         latency_csv: Optional[str] = None,
         stop_event=None,
         newpayload_version: Optional[int] = None,
+        fcu_wait_seconds: float = 600.0,
     ):
         self.engine = engine
         self.records = records
@@ -138,12 +140,18 @@ class ReplayDriver:
         # per-record newpayload_version); these are Prague blocks whose auto-pick
         # otherwise lands on V3. None => fall back to each record's version (or auto).
         self.newpayload_version = newpayload_version
+        # How long to poll FCU for a SYNCING (async-queued) block to land before
+        # giving up. Deliberately its own knob: the engine's per-request timeout
+        # bounds one HTTP round-trip, while this bounds a block's whole async
+        # execution, which at bloatnet scale can far exceed a single request.
+        self.fcu_wait_seconds = fcu_wait_seconds
 
     def run(self) -> Dict[str, Any]:
         """Drive newPayload(+forkchoiceUpdated) per record; return latency summary."""
         rows: List[Dict[str, Any]] = []
         new_payload_ms: List[float] = []
         fcu_ms: List[float] = []
+        sync_wait_ms: List[float] = []
 
         for i, record in enumerate(self.records):
             if self.count is not None and i >= self.count:
@@ -163,33 +171,75 @@ class ReplayDriver:
             np_ms = (time.perf_counter() - t0) * 1000.0
             new_payload_ms.append(np_ms)
 
-            status = (np_result or {}).get("status")
-            if status == "INVALID":
+            def _fail(status_label: str, message: str) -> None:
                 rows.append({
                     "block_number": record.block_number,
                     "new_payload_ms": np_ms,
                     "fcu_ms": None,
-                    "status": status,
+                    "sync_wait_ms": None,
+                    "status": status_label,
                 })
                 self._maybe_write_csv(rows)
-                raise RuntimeError(
-                    f"newPayload returned INVALID at block {record.block_number}: {np_result}"
-                )
+                raise RuntimeError(message)
+
+            status = (np_result or {}).get("status")
+            if status == "INVALID":
+                _fail(status, f"newPayload returned INVALID at block {record.block_number}: {np_result}")
 
             fcu_ms_val: Optional[float] = None
-            if status in ("VALID", "ACCEPTED") and self.advance_head:
-                t1 = time.perf_counter()
-                self.engine.forkchoice_updated(head=record.block_hash)
-                fcu_ms_val = (time.perf_counter() - t1) * 1000.0
+            sync_wait_ms_val: Optional[float] = None
+            if status in ("VALID", "ACCEPTED", "SYNCING") and self.advance_head:
+                # SYNCING = the EL queued the block for async processing (Nethermind
+                # does this for heavy bloat blocks). An FCU sent now is a no-op for
+                # the head, so poll FCU until the payload lands (VALID) — otherwise
+                # the head freezes at the snapshot base while the replay burns the
+                # whole payload file.
+                wait_start = time.perf_counter()
+                deadline = wait_start + self.fcu_wait_seconds
+                while True:
+                    t1 = time.perf_counter()
+                    fcu_result = self.engine.forkchoice_updated(head=record.block_hash)
+                    fcu_ms_val = (time.perf_counter() - t1) * 1000.0
+                    fcu_status = ((fcu_result or {}).get("payloadStatus") or {}).get("status")
+                    if fcu_status == "VALID":
+                        break
+                    if fcu_status == "INVALID":
+                        _fail(
+                            f"FCU_{fcu_status}",
+                            f"forkchoiceUpdated returned INVALID at block "
+                            f"{record.block_number}: {fcu_result}",
+                        )
+                    if time.perf_counter() > deadline:
+                        _fail(
+                            f"FCU_TIMEOUT_{fcu_status}",
+                            f"forkchoiceUpdated stuck on {fcu_status} for "
+                            f"{self.fcu_wait_seconds:g}s at block {record.block_number}",
+                        )
+                    time.sleep(2.0)
+                # fcu_ms is the final (successful) FCU call only; the poll sleeps
+                # and the block's async execution go to sync_wait_ms so the FCU
+                # percentiles stay comparable across clients and runs.
                 fcu_ms.append(fcu_ms_val)
+                if status == "SYNCING":
+                    sync_wait_ms_val = (time.perf_counter() - wait_start) * 1000.0
+                    sync_wait_ms.append(sync_wait_ms_val)
 
             rows.append({
                 "block_number": record.block_number,
                 "new_payload_ms": np_ms,
                 "fcu_ms": fcu_ms_val,
-                "status": status,
+                "sync_wait_ms": sync_wait_ms_val,
+                # A SYNCING newPayload that the FCU poll drove to VALID did land;
+                # keep it distinguishable from a block that never imported.
+                "status": "SYNCING_LANDED" if status == "SYNCING" and fcu_ms_val is not None else status,
             })
+            # Flush per block: replays die mid-run (timeouts, kills) and an
+            # end-of-loop-only flush loses every row when they do.
+            self._maybe_write_csv(rows)
 
+        # Also flush after the loop: with zero records this is the only writer,
+        # and run_benchmark.sh existence-checks the CSV to tell "drove 0 blocks"
+        # from "produced no latency CSV".
         self._maybe_write_csv(rows)
 
         return {
@@ -198,14 +248,21 @@ class ReplayDriver:
             "new_payload_ms_p95": _percentile(new_payload_ms, 95),
             "fcu_ms_p50": _percentile(fcu_ms, 50),
             "fcu_ms_p95": _percentile(fcu_ms, 95),
+            "sync_wait_ms_p50": _percentile(sync_wait_ms, 50),
+            "sync_wait_ms_p95": _percentile(sync_wait_ms, 95),
         }
 
     def _maybe_write_csv(self, rows: List[Dict[str, Any]]) -> None:
         if not self.latency_csv:
             return
-        with open(self.latency_csv, "w", newline="") as f:
+        # Write to a temp file and atomically rename: this flush runs per block,
+        # and a kill (the runner's exit trap) landing mid-rewrite would otherwise
+        # leave a truncated CSV (lost tail rows).
+        tmp = self.latency_csv + ".tmp"
+        with open(tmp, "w", newline="") as f:
             writer = csv.DictWriter(
-                f, fieldnames=["block_number", "new_payload_ms", "fcu_ms", "status"]
+                f, fieldnames=["block_number", "new_payload_ms", "fcu_ms", "sync_wait_ms", "status"]
             )
             writer.writeheader()
             writer.writerows(rows)
+        os.replace(tmp, self.latency_csv)
