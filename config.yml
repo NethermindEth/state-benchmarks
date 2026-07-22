@@ -1,6 +1,11 @@
 infrastructure:
   manage: true
   ssh_command: "" # e.g. "ssh user@host", leave empty for local execution
+  # Grace period (seconds) passed to `compose down -t` for the clients stack.
+  # Compose's 10s default SIGKILLs clients that need a long graceful stop —
+  # Nethermind flat-DB flushes its in-memory state snapshot on StopAsync and a
+  # kill means a 1-2h rescan (or corruption) on the next boot of big datadirs.
+  stop_timeout_sec: 600
   compose_paths:
     monitoring: "docker/docker-compose.monitoring.yml"
     clients: "docker/docker-compose.clients.yml"
@@ -22,8 +27,15 @@ nodes:
   rpc_startup_timeout_sec: 300
   # Sync is only considered complete when eth_syncing is false AND the head
   # block timestamp is at most this many seconds old (guards against clients
-  # reporting "not syncing" before sync has actually started).
+  # reporting "not syncing" before sync has actually started). Freshness only
+  # applies to live sync (consensus_mode: lighthouse); frozen targets
+  # (mock/none) have historical heads and use the pivot number / the
+  # syncing-flag transition instead — see runner.sync_head_ok.
   sync_head_freshness_sec: 120
+  # Absolute wall-clock cap (seconds) on the sync measurement. A sync still
+  # incomplete after this raises and fails that client's run instead of
+  # hanging the whole matrix forever.
+  sync_timeout_sec: 86400
   clients:
     - "geth"
     - "nethermind"
@@ -67,10 +79,20 @@ metrics:
       # Geth emits go-metrics summaries, not histograms — histogram_quantile()
       # returns empty against them. chain_inserts = TOTAL block-import time in
       # nanoseconds (chain_execution is only the EVM phase, ~2x understated).
-      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
-      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
-      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
-      gas_per_sec:    'rate(chain_head_gas_used[{window}])'
+      # chain_inserts is a ResettingTimer (quantiles cover only the last scrape
+      # interval), so wrap in avg_over_time to cover {window}: a time-average
+      # of per-interval quantiles, not a true windowed quantile — the closest
+      # go-metrics allows. Consistent per-client across milestones, but not the
+      # same quantity as the other clients' windowed histogram_quantile.
+      block_proc_p50: 'avg_over_time(chain_inserts{quantile="0.5"}[{window}]) / 1e9'
+      block_proc_p95: 'avg_over_time(chain_inserts{quantile="0.95"}[{window}]) / 1e9'
+      block_proc_p99: 'avg_over_time(chain_inserts{quantile="0.99"}[{window}]) / 1e9'
+      # Geth has NO cumulative gas counter (chain/head/* gauges are block
+      # numbers only). chain_mgasps records per-block EXECUTION throughput
+      # (gas / execution time, in Mgas/s) — a different quantity than
+      # nethermind's wall-clock rate(...gas_used); compare per-client across
+      # milestones, not across clients.
+      gas_per_sec:    'avg_over_time(chain_mgasps{quantile="0.5"}[{window}]) * 1e6'
     besu:
       block_proc_p50: 'histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
       block_proc_p95: 'histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
@@ -82,24 +104,32 @@ metrics:
       block_proc_p99: 'histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
       gas_per_sec:    'rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6'
     erigon:
+      # UNVERIFIED (no erigon template yet): upstream registers block execution
+      # as the SUMMARY chain_execution_seconds, so these _bucket queries likely
+      # return nothing — revisit against a live /metrics before first use.
+      # gas_per_sec was dropped: erigon has no chain_head_gas_used metric.
       block_proc_p50: 'histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
       block_proc_p95: 'histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
       block_proc_p99: 'histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
-      gas_per_sec:    'rate(chain_head_gas_used[{window}])'
 
   # Fraction by which a metric must change in the bad direction (lower for
   # latency-style metrics, higher for throughput-style ones) before the
   # aggregator flags it as a regression. 0.25 = 25%.
   regression_threshold: 0.25
 
-  # Higher-is-better metrics. The aggregator's regression check flips sign for these.
+  # Above this aggregate Locust failure ratio the run's rpc_* latency /
+  # throughput metrics are suppressed (Locust records response times for
+  # failed requests too, so an all-errors run would otherwise read as
+  # excellent low latency and pass the regression gate).
+  max_failure_ratio: 0.1
+
+  # Higher-is-better metrics. The aggregator's regression check flips sign for
+  # these. Only TRUE throughput metrics belong here — at a fixed workload more
+  # disk IOPS / network traffic usually means thrashing (worse), so IO/net
+  # metrics stay lower-is-better.
   higher_is_better:
     - "rpc_requests_sec"
     - "gas_per_sec"
-    - "disk_throughput_peak_bytes_per_sec"
-    - "disk_iops_peak"
-    - "net_rx_bytes_per_sec_peak"
-    - "net_rx_bytes_per_sec_avg"
 
 load_test:
   run_time: "5m"

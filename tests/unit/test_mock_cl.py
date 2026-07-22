@@ -149,6 +149,54 @@ def test_forkchoice_updated_defaults_and_shape():
     assert attrs is None
 
 
+# ---------- engine: _rpc transport-error retry ----------
+
+class _Resp:
+    status_code = 200
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def test_engine_rpc_retries_transport_timeout(monkeypatch):
+    """A ReadTimeout on a slow newPayload retries within the wall-clock budget
+    instead of aborting the whole replay — at bloatnet scale multi-second
+    blocks are exactly the ones we want to measure."""
+    client = EngineClient("http://x", b"\x00" * 32, timeout=60)
+    calls = {"n": 0}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise engine_mod.requests.exceptions.ReadTimeout("slow block")
+        return _Resp({"result": {"status": "VALID"}})
+
+    monkeypatch.setattr(engine_mod.requests, "post", fake_post)
+    monkeypatch.setattr(engine_mod.time, "sleep", lambda *_: None)
+
+    assert client._rpc("engine_newPayloadV3", []) == {"status": "VALID"}
+    assert calls["n"] == 2
+
+
+def test_engine_rpc_transport_errors_exhaust_budget(monkeypatch):
+    """Persistent transport errors raise once the total budget is burned."""
+    client = EngineClient("http://x", b"\x00" * 32, timeout=10)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(engine_mod.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(engine_mod.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        clock["t"] += 4.0
+        raise engine_mod.requests.exceptions.ConnectionError("refused")
+
+    monkeypatch.setattr(engine_mod.requests, "post", fake_post)
+    with pytest.raises(RuntimeError, match="exceeded"):
+        client._rpc("engine_newPayloadV3", [])
+
+
 # ---------- payloads: load_payloads ----------
 
 def test_load_payloads_parses_jsonl(tmp_path):
@@ -219,14 +267,18 @@ class _FakeEngine:
         return {"payloadStatus": {"status": "VALID"}}
 
 
-def _record(block_hash, number, newpayload_version=None, execution_requests=None):
+def _record(block_hash, number, newpayload_version=None, execution_requests=None,
+            parent_hash=None, fork=None):
+    # Default parentHash follows the tests' "0x<number>" hash convention so
+    # consecutive _record(number)s chain (the driver validates chaining).
+    parent_hash = parent_hash if parent_hash is not None else hex(number - 1)
     return payloads_mod.PayloadRecord(
-        payload={"blockHash": block_hash, "blockNumber": hex(number)},
+        payload={"blockHash": block_hash, "blockNumber": hex(number), "parentHash": parent_hash},
         block_hash=block_hash,
         block_number=number,
         versioned_hashes=None,
         parent_beacon_block_root=None,
-        fork=None,
+        fork=fork,
         execution_requests=execution_requests,
         newpayload_version=newpayload_version,
     )
@@ -240,8 +292,9 @@ def test_replay_driver_three_valid_in_order(tmp_path):
     summary = ReplayDriver(engine, records, latency_csv=str(csv_path)).run()
 
     assert summary["blocks"] == 3
-    # 3 newPayload + 3 FCU, interleaved in order.
+    # Base-preflight FCU, then 3 newPayload + 3 FCU interleaved in order.
     assert engine.calls == [
+        ("forkchoice_updated", "0x0"),
         ("new_payload", "0x1"), ("forkchoice_updated", "0x1"),
         ("new_payload", "0x2"), ("forkchoice_updated", "0x2"),
         ("new_payload", "0x3"), ("forkchoice_updated", "0x3"),
@@ -259,6 +312,7 @@ def test_replay_driver_invalid_raises_and_stops():
         ReplayDriver(engine, records).run()
     # Stopped at the INVALID block: 1 valid newPayload+FCU, then the INVALID newPayload.
     assert engine.calls == [
+        ("forkchoice_updated", "0x0"),
         ("new_payload", "0x1"), ("forkchoice_updated", "0x1"),
         ("new_payload", "0x2"),
     ]
@@ -268,7 +322,8 @@ def test_replay_driver_polls_fcu_until_syncing_block_lands(tmp_path, monkeypatch
     """A SYNCING newPayload is FCU-polled to VALID and recorded as landed."""
     monkeypatch.setattr(drivers.time, "sleep", lambda *_: None)
     engine = _FakeEngine(["SYNCING"])
-    fcu_statuses = ["SYNCING", "SYNCING", "VALID"]
+    # First FCU is the base preflight (must be VALID), then the poll.
+    fcu_statuses = ["VALID", "SYNCING", "SYNCING", "VALID"]
 
     def fcu(head, **kwargs):
         engine.calls.append(("forkchoice_updated", head))
@@ -281,6 +336,7 @@ def test_replay_driver_polls_fcu_until_syncing_block_lands(tmp_path, monkeypatch
 
     assert summary["blocks"] == 1
     assert engine.calls == [
+        ("forkchoice_updated", "0x0"),
         ("new_payload", "0x1"),
         ("forkchoice_updated", "0x1"),
         ("forkchoice_updated", "0x1"),
@@ -299,7 +355,10 @@ def test_replay_driver_fcu_wait_timeout_aborts(monkeypatch):
     """A block stuck on SYNCING past fcu_wait_seconds aborts the replay."""
     monkeypatch.setattr(drivers.time, "sleep", lambda *_: None)
     engine = _FakeEngine(["SYNCING"])
-    engine.forkchoice_updated = lambda head, **kw: {"payloadStatus": {"status": "SYNCING"}}
+    # Base preflight (head=0x0) passes; the poll for the block never lands.
+    engine.forkchoice_updated = lambda head, **kw: {
+        "payloadStatus": {"status": "VALID" if head == "0x0" else "SYNCING"}
+    }
     with pytest.raises(RuntimeError, match="stuck on SYNCING"):
         ReplayDriver(engine, [_record("0x1", 1)], fcu_wait_seconds=0.0).run()
 
@@ -327,6 +386,53 @@ def test_replay_driver_uses_per_record_version_without_override():
     assert engine.new_payload_kwargs[0]["version"] == 4
     assert engine.new_payload_kwargs[0]["execution_requests"] == []
     assert engine.new_payload_kwargs[1]["version"] is None
+
+
+def test_replay_driver_resolves_version_from_record_fork():
+    """A Prague record without an explicit version resolves V4 from its fork
+    field — the engine's shape-based auto-pick can't tell Cancun from Prague."""
+    engine = _FakeEngine(["VALID", "VALID"])
+    records = [_record("0x1", 1, fork="prague"), _record("0x2", 2, fork="cancun")]
+    ReplayDriver(engine, records, advance_head=False).run()
+    assert [kw["version"] for kw in engine.new_payload_kwargs] == [4, 3]
+
+
+def test_replay_driver_unknown_status_fails(tmp_path):
+    """A None / unmodeled newPayload status must hard-fail like INVALID —
+    otherwise the row is recorded, no FCU is sent, and the CSV looks full
+    while zero blocks actually imported."""
+    engine = _FakeEngine([None])
+    csv_path = tmp_path / "lat.csv"
+    with pytest.raises(RuntimeError, match="unexpected status"):
+        ReplayDriver(engine, [_record("0x1", 1)], latency_csv=str(csv_path)).run()
+    with open(csv_path) as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["status"] == "NO_STATUS"
+
+    engine = _FakeEngine(["INVALID_BLOCK_HASH"])
+    with pytest.raises(RuntimeError, match="INVALID_BLOCK_HASH"):
+        ReplayDriver(engine, [_record("0x1", 1)]).run()
+
+
+def test_replay_driver_chain_gap_fails_fast():
+    """A gapped payload file fails before touching the engine for that block,
+    instead of spinning the FCU poll for fcu_wait_seconds per block."""
+    engine = _FakeEngine(["VALID", "VALID"])
+    records = [_record("0x1", 1), _record("0x3", 3, parent_hash="0x2")]
+    with pytest.raises(RuntimeError, match="chain gap at block 3"):
+        ReplayDriver(engine, records).run()
+    # Block 3's newPayload was never sent.
+    assert ("new_payload", "0x3") not in engine.calls
+
+
+def test_replay_driver_base_mismatch_fails_before_first_payload():
+    """If the EL does not recognize the first payload's parent (file doesn't
+    start at snapshot head + 1), fail with a clear message up front."""
+    engine = _FakeEngine(["VALID"])
+    engine.forkchoice_updated = lambda head, **kw: {"payloadStatus": {"status": "SYNCING"}}
+    with pytest.raises(RuntimeError, match="base mismatch"):
+        ReplayDriver(engine, [_record("0x1", 1)]).run()
+    assert all(call[0] != "new_payload" for call in engine.calls)
 
 
 # ---------- drivers: PivotDriver ----------

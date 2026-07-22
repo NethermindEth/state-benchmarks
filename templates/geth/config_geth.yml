@@ -76,10 +76,18 @@ metrics:
       # NOTE: the first run after this switch shows a one-time ~2x block_proc
       # jump vs milestones recorded with chain_execution — an expected metric
       # correction, not a client regression (--fail-on-regression will trip).
-      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
-      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
-      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
-      gas_per_sec: "rate(chain_head_gas_used[{window}])"
+      # chain_inserts is a ResettingTimer (quantiles cover only the last scrape
+      # interval), so wrap in avg_over_time to cover {window}: a time-average
+      # of per-interval quantiles — the closest go-metrics allows, consistent
+      # per-client across milestones.
+      block_proc_p50: 'avg_over_time(chain_inserts{quantile="0.5"}[{window}]) / 1e9'
+      block_proc_p95: 'avg_over_time(chain_inserts{quantile="0.95"}[{window}]) / 1e9'
+      block_proc_p99: 'avg_over_time(chain_inserts{quantile="0.99"}[{window}]) / 1e9'
+      # Geth has NO cumulative gas counter (chain/head/* gauges are block
+      # numbers). chain_mgasps = per-block EXECUTION throughput (Mgas/s) — a
+      # different quantity than nethermind's wall-clock rate(...gas_used);
+      # compare per-client across milestones, not across clients.
+      gas_per_sec: 'avg_over_time(chain_mgasps{quantile="0.5"}[{window}]) * 1e6'
     besu:
       block_proc_p50: "histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
       block_proc_p95: "histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
@@ -91,20 +99,24 @@ metrics:
       block_proc_p99: "histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
       gas_per_sec: "rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6"
     erigon:
+      # UNVERIFIED (no erigon template yet); gas_per_sec dropped — erigon has
+      # no chain_head_gas_used metric.
       block_proc_p50: "histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
       block_proc_p95: "histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
       block_proc_p99: "histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
-      gas_per_sec: "rate(chain_head_gas_used[{window}])"
 
   regression_threshold: 0.25
 
+  # Above this aggregate Locust failure ratio the run's rpc_* metrics are
+  # suppressed (a mostly-erroring run would otherwise read as fast).
+  max_failure_ratio: 0.1
+
+  # Only TRUE throughput metrics — at a fixed workload more disk IOPS /
+  # network traffic usually means thrashing (worse), so IO/net metrics stay
+  # lower-is-better.
   higher_is_better:
     - "rpc_requests_sec"
     - "gas_per_sec"
-    - "disk_throughput_peak_bytes_per_sec"
-    - "disk_iops_peak"
-    - "net_rx_bytes_per_sec_peak"
-    - "net_rx_bytes_per_sec_avg"
 
 load_test:
   run_time: "5m"

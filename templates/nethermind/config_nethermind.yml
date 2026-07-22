@@ -62,20 +62,28 @@ metrics:
       # block-import time; chain_execution is only the EVM-execution phase of it
       # (~40-60% at bloatnet scale) — using it here understated geth block-proc
       # by ~2x vs Nethermind's full-pipeline gauge (fixed 2026-07-10).
-      block_proc_p50: 'chain_inserts{quantile="0.5"} / 1e9'
-      block_proc_p95: 'chain_inserts{quantile="0.95"} / 1e9'
-      block_proc_p99: 'chain_inserts{quantile="0.99"} / 1e9'
-      gas_per_sec: "rate(chain_head_gas_used[{window}])"
+      # chain_inserts is a ResettingTimer (quantiles cover only the last scrape
+      # interval), so wrap in avg_over_time to cover {window}. gas_per_sec:
+      # geth has no cumulative gas counter — chain_mgasps is per-block
+      # EXECUTION throughput (Mgas/s), not directly comparable to nethermind's
+      # wall-clock rate(...gas_used).
+      block_proc_p50: 'avg_over_time(chain_inserts{quantile="0.5"}[{window}]) / 1e9'
+      block_proc_p95: 'avg_over_time(chain_inserts{quantile="0.95"}[{window}]) / 1e9'
+      block_proc_p99: 'avg_over_time(chain_inserts{quantile="0.99"}[{window}]) / 1e9'
+      gas_per_sec: 'avg_over_time(chain_mgasps{quantile="0.5"}[{window}]) * 1e6'
 
   regression_threshold: 0.25
 
+  # Above this aggregate Locust failure ratio the run's rpc_* metrics are
+  # suppressed (a mostly-erroring run would otherwise read as fast).
+  max_failure_ratio: 0.1
+
+  # Only TRUE throughput metrics — at a fixed workload more disk IOPS /
+  # network traffic usually means thrashing (worse), so IO/net metrics stay
+  # lower-is-better.
   higher_is_better:
     - "rpc_requests_sec"
     - "gas_per_sec"
-    - "disk_throughput_peak_bytes_per_sec"
-    - "disk_iops_peak"
-    - "net_rx_bytes_per_sec_peak"
-    - "net_rx_bytes_per_sec_avg"
 
 load_test:
   run_time: "10m"

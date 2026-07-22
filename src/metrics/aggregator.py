@@ -15,6 +15,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 DEFAULT_REGRESSION_THRESHOLD = 0.25  # 25% spec — used when metrics.regression_threshold is absent.
+# Above this aggregate failure ratio the Locust latency/throughput numbers are
+# meaningless (Locust records response times for FAILED requests too, so a
+# mostly-erroring run reads as excellent ~2ms latency) — suppress them.
+DEFAULT_MAX_FAILURE_RATIO = 0.1
 
 
 def load_config(path: str = "config.yml") -> Dict[str, Any]:
@@ -77,16 +81,29 @@ def gather_prometheus_metrics(
     queries: Dict[str, str],
     client_queries: Dict[str, str],
     window: str,
-) -> Dict[str, float]:
+) -> tuple:
+    """Run all configured queries; return (metrics, missing_metric_names).
+
+    The missing list is reported alongside the metrics (not just logged) so a
+    mostly-empty report is visibly incomplete instead of silently thin —
+    configured-but-absent metric families (wrong metric name, scrape down) are
+    a real failure mode, not noise.
+    """
     metrics: Dict[str, float] = {}
+    missing: List[str] = []
     for source in (queries, client_queries):
         for name, query_template in source.items():
             value = query_prometheus(prom_url, render_query(query_template, client, window))
             if value is None:
                 logger.warning(f"Metric {name!r} unavailable (query failed or returned no data); omitting.")
+                missing.append(name)
                 continue
             metrics[name] = value
-    return metrics
+    if missing:
+        logger.warning(
+            f"{len(missing)} configured metric(s) returned no data: {', '.join(missing)}"
+        )
+    return metrics, missing
 
 
 def parse_locust_stats(csv_path: str) -> Dict[str, Any]:
@@ -149,6 +166,36 @@ def parse_proof_sizes(csv_path: str) -> Dict[str, float]:
         "mean_bytes": statistics.fmean(sizes),
         "sample_count": len(sizes),
     }
+
+
+def locust_aggregate_metrics(agg: Dict[str, Any], max_failure_ratio: float) -> tuple:
+    """Turn the Locust aggregate row into flat metrics; gate on failure ratio.
+
+    Returns (metrics_dict, load_test_valid). Locust records response times for
+    FAILED requests too, so a mostly-erroring run (state slid out of the
+    pinned band, bad address set, unsupported method) yields fast bogus
+    latencies — above max_failure_ratio only rpc_failure_ratio is kept, so a
+    broken run can neither read as the best one nor become the regression
+    baseline for the next milestone.
+    """
+    failure_ratio = (agg["failure_count"] / agg["request_count"]) if agg["request_count"] else 0.0
+    metrics: Dict[str, float] = {"rpc_failure_ratio": failure_ratio}
+    if failure_ratio > max_failure_ratio:
+        logger.error(
+            f"Load test failure ratio {failure_ratio:.1%} exceeds "
+            f"metrics.max_failure_ratio ({max_failure_ratio:.1%}); the run's RPC "
+            f"latency/throughput numbers are meaningless and will be omitted "
+            f"(raw Locust stats are kept under 'rpc')."
+        )
+        return metrics, False
+    metrics.update({
+        "rpc_p50_latency_ms": agg["p50_ms"],
+        "rpc_p95_latency_ms": agg["p95_ms"],
+        "rpc_p99_latency_ms": agg["p99_ms"],
+        "rpc_mean_latency_ms": agg["mean_ms"],
+        "rpc_requests_sec": agg["requests_per_sec"],
+    })
+    return metrics, True
 
 
 def load_sync_metrics(milestone_dir: str, client: str) -> Dict[str, Any]:
@@ -293,7 +340,7 @@ def run_sync_phase(client: str, milestone_dir: str, prom_url: str,
                    cross_queries: Dict[str, str], client_queries: Dict[str, str],
                    sync_window: str):
     """Capture system metrics right after sync, while the window still covers it."""
-    metrics = gather_prometheus_metrics(client, prom_url, cross_queries, client_queries, sync_window)
+    metrics, missing = gather_prometheus_metrics(client, prom_url, cross_queries, client_queries, sync_window)
     path = sync_phase_path(milestone_dir, client)
     with open(path, 'w') as f:
         json.dump({
@@ -301,6 +348,7 @@ def run_sync_phase(client: str, milestone_dir: str, prom_url: str,
             "window": sync_window,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": metrics,
+            "missing_metrics": missing,
         }, f, indent=2)
     logger.info(f"Saved sync-phase metrics to {path}")
 
@@ -327,6 +375,7 @@ def main():
     sync_window = metrics_cfg.get("sync_window", "1h")
     higher_is_better = set(metrics_cfg.get("higher_is_better", []))
     regression_threshold = float(metrics_cfg.get("regression_threshold", DEFAULT_REGRESSION_THRESHOLD))
+    max_failure_ratio = float(metrics_cfg.get("max_failure_ratio", DEFAULT_MAX_FAILURE_RATIO))
 
     milestone_dir = os.path.join("benchmarks", args.milestone)
     os.makedirs(milestone_dir, exist_ok=True)
@@ -337,7 +386,8 @@ def main():
         return
 
     # 1. Prometheus metrics over the load window.
-    flat_metrics = gather_prometheus_metrics(args.client, prom_url, cross_queries, client_queries, load_window)
+    flat_metrics, missing_metrics = gather_prometheus_metrics(
+        args.client, prom_url, cross_queries, client_queries, load_window)
 
     # 1b. Sync-phase snapshot (written by --phase sync right after sync ended).
     sync_phase_file = sync_phase_path(milestone_dir, args.client)
@@ -356,16 +406,14 @@ def main():
         flat_metrics["sync_time_sec"] = float(sync["sync_time_sec"])
     state_size = sync.get("db_size_bytes")
 
-    # 3. Locust stats.
+    # 3. Locust stats, gated on the aggregate failure ratio (see
+    # locust_aggregate_metrics — an all-errors run must not read as fast).
     locust_csv = os.path.join(client_dir, "locust_stats_stats.csv")
     rpc = parse_locust_stats(locust_csv)
+    load_test_valid = True
     if rpc.get("aggregate"):
-        agg = rpc["aggregate"]
-        flat_metrics["rpc_p50_latency_ms"] = agg["p50_ms"]
-        flat_metrics["rpc_p95_latency_ms"] = agg["p95_ms"]
-        flat_metrics["rpc_p99_latency_ms"] = agg["p99_ms"]
-        flat_metrics["rpc_mean_latency_ms"] = agg["mean_ms"]
-        flat_metrics["rpc_requests_sec"] = agg["requests_per_sec"]
+        rpc_metrics, load_test_valid = locust_aggregate_metrics(rpc["aggregate"], max_failure_ratio)
+        flat_metrics.update(rpc_metrics)
 
     # 4. Proof sizes.
     proof = parse_proof_sizes(os.path.join(client_dir, "proof_sizes.csv"))
@@ -388,7 +436,9 @@ def main():
         "milestone": args.milestone,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "state_size_bytes": state_size,
+        "load_test_valid": load_test_valid,
         "metrics": flat_metrics,
+        "missing_metrics": missing_metrics,
         "rpc": rpc,
         "proof_sizes": proof,
         "regressions": regressions,
@@ -403,6 +453,9 @@ def main():
     write_csv_summary(csv_path, args.client, state_size, {**payload["metrics"], "rpc": rpc, "proof_sizes": proof})
     logger.info(f"Saved CSV summary to {csv_path}")
 
+    if args.fail_on_regression and not load_test_valid:
+        logger.error("Load test exceeded the failure-ratio gate; exiting non-zero (--fail-on-regression).")
+        sys.exit(2)
     if regressions and args.fail_on_regression:
         logger.error(f"{len(regressions)} regression(s) detected; exiting non-zero (--fail-on-regression).")
         sys.exit(2)

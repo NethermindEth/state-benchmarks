@@ -43,7 +43,10 @@ services:
     container_name: benchmark_nethermind
     tty: true
     restart: unless-stopped
-    stop_grace_period: 30s
+    # Nethermind flat-DB flushes its in-memory state snapshot on StopAsync —
+    # a SIGKILL means a 1-2h rescan (or corruption) on next boot of big
+    # datadirs, so give the graceful stop real time to finish.
+    stop_grace_period: 600s
     environment:
       - TERM=xterm-256color
       - COLORTERM=truecolor
@@ -60,10 +63,15 @@ services:
     command:
       - --config=mainnet
       - --datadir=/nethermind/data
-      # Bloatnet shadowfork: fork rules come from the mounted chainspec; the p2p
-      # network id (12159) is distinct from the chainId (1).
+      # The chainId comes from the mounted chainspec, NOT from here — the
+      # ethpandaops bloatnet is a mainnet shadowfork (chainId 1, p2p network id
+      # 12159). Internally-generated x7/x10 bloat payloads are EIP-155-signed
+      # with chainId 12159: replaying them against a chainId-1 chainspec
+      # returns newPayload INVALID "invalid chain ID". For those, point
+      # NETHERMIND_CHAINSPEC_PATH at the x7/x10 chainspec (chainId 12159) and
+      # set NETHERMIND_NETWORK_ID to match — both in .env.nethermind.
       - --Init.ChainSpecPath=/chainspec.json
-      - --Init.NetworkId=12159
+      - --Init.NetworkId=${NETHERMIND_NETWORK_ID:-12159}
       # FlatDb state layout the snapshot was written with — must match the image.
       - --FlatDb.Enabled=true
       # Queryable historical-state window for FlatDb: eth_getStorageAt/eth_call

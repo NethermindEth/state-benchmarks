@@ -46,12 +46,14 @@ class EngineClient:
         """POST a JSON-RPC request; raise RuntimeError on HTTP/JSON-RPC error.
 
         Retries on the server-side RPC timeout (-32002, e.g. geth's authrpc
-        30s write timeout on a slow newPayload). The client keeps executing
-        the request after answering -32002, so a retried call just blocks on
-        the chain lock and returns the real status once the block lands.
+        30s write timeout on a slow newPayload) and on transport-level
+        timeouts / connection errors — at bloatnet scale multi-second
+        newPayloads routinely outlive a single HTTP round-trip, and the EL
+        keeps executing the request either way, so a retried call just blocks
+        on the chain lock and returns the real status once the block lands.
         ``self.timeout`` is the total wall-clock budget for one call: each
-        retry's request timeout is capped to the remaining budget, so retries
-        never stretch a call past ~timeout. (-32002 is also the generic
+        retry's request timeout is capped to the remaining budget, and the
+        call raises once the budget is exhausted. (-32002 is also the generic
         "resource unavailable" JSON-RPC code, so a permanent error with that
         code burns the budget before raising — the warning logs the error
         message to make that diagnosable.)
@@ -59,16 +61,31 @@ class EngineClient:
         self._id += 1
         body = {"jsonrpc": "2.0", "method": method, "params": params, "id": self._id}
         start = time.monotonic()
+        last_error: Optional[str] = None
         while True:
             headers = {
                 "Authorization": f"Bearer {make_jwt(self.secret)}",
                 "Content-Type": "application/json",
             }
             remaining = self.timeout - (time.monotonic() - start)
-            response = requests.post(
-                self.engine_url, json=body, headers=headers,
-                timeout=max(1.0, remaining),
-            )
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"{method} exceeded the {self.timeout}s wall-clock budget"
+                    f" (last error: {last_error or 'none'})"
+                )
+            try:
+                response = requests.post(
+                    self.engine_url, json=body, headers=headers,
+                    timeout=max(1.0, remaining),
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "%s transport error after %.0fs (%s); retrying within budget",
+                    method, time.monotonic() - start, last_error,
+                )
+                time.sleep(1)
+                continue
             if response.status_code != 200:
                 raise RuntimeError(f"{method} HTTP {response.status_code}: {response.text}")
             data = response.json()
@@ -117,6 +134,13 @@ class EngineClient:
         Auto-selection (when ``version`` is None): V4 if execution requests are
         supplied (Prague); V3 if the payload carries blobGasUsed/excessBlobGas
         (Cancun); V2 if it carries withdrawals (Shanghai); else V1 (Paris).
+
+        Caveat: Cancun and Prague payloads are structurally identical (execution
+        requests live NEXT TO the payload, not inside it), so a Prague block
+        without a supplied ``execution_requests`` list auto-picks V3 and the EL
+        answers -38005. Callers that know the fork must pass ``version``
+        explicitly — the replay driver resolves it from the record's ``fork``
+        field via :func:`newpayload_version_for_fork`.
         """
         if version is None:
             if execution_requests is not None:

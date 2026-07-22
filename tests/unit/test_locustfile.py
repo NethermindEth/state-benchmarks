@@ -216,3 +216,74 @@ def test_eth_send_transaction_sends_value_transfer():
     assert tx["to"] in locustfile.ADDRESSES
     assert tx["value"] == "0x1"
     assert tx["gas"] == "0x5208"
+
+
+# ---------- rpc_call error classification ----------
+# Locust only counts what we tell it: an HTTP 200 carrying a JSON-RPC error
+# body MUST be marked a failure, or an all-errors run (e.g. "No state
+# available") reads as a healthy low-latency one.
+
+import json as _json
+
+
+class _FakeCatchResponse:
+    def __init__(self, status_code=200, body=None, invalid_json=False):
+        self.status_code = status_code
+        self._body = body
+        self._invalid_json = invalid_json
+        self.failures = []
+        self.succeeded = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def json(self):
+        if self._invalid_json:
+            raise _json.JSONDecodeError("bad", "", 0)
+        return self._body
+
+    def failure(self, msg):
+        self.failures.append(msg)
+
+    def success(self):
+        self.succeeded = True
+
+
+def _rpc_call_with(response):
+    fake_self = MagicMock()
+    fake_self.client.post.return_value = response
+    return locustfile.EthereumRPCUser.rpc_call(fake_self, "eth_getBalance", ["0xabc", "latest"])
+
+
+def test_rpc_call_success_on_result_body():
+    resp = _FakeCatchResponse(body={"jsonrpc": "2.0", "id": 1, "result": "0x1"})
+    out = _rpc_call_with(resp)
+    assert out is resp
+    assert resp.succeeded is True
+    assert resp.failures == []
+
+
+def test_rpc_call_marks_200_with_error_body_as_failure():
+    resp = _FakeCatchResponse(
+        body={"jsonrpc": "2.0", "id": 1,
+              "error": {"code": -32000, "message": "No state available"}})
+    assert _rpc_call_with(resp) is None
+    assert resp.succeeded is False
+    assert any("RPC Error" in f for f in resp.failures)
+
+
+def test_rpc_call_marks_non_200_as_failure():
+    resp = _FakeCatchResponse(status_code=503)
+    assert _rpc_call_with(resp) is None
+    assert resp.succeeded is False
+    assert any("HTTP 503" in f for f in resp.failures)
+
+
+def test_rpc_call_marks_unparseable_body_as_failure():
+    resp = _FakeCatchResponse(invalid_json=True)
+    assert _rpc_call_with(resp) is None
+    assert resp.succeeded is False
+    assert any("JSON" in f for f in resp.failures)

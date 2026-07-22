@@ -39,6 +39,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -160,15 +161,45 @@ def _run(cmd: List[str], check: bool) -> int:
     return subprocess.run(cmd, check=check).returncode
 
 
+def _umount_with_retry(cfg: OverlayConfig, attempts: int = 5, delay: float = 2.0) -> None:
+    """Unmount the overlay, tolerating a transiently busy target.
+
+    overlayfs umount routinely returns "target is busy" while a container (or a
+    lagging containerd shim) still holds the merged dir. Retry briefly, then
+    fall back to a lazy umount (detach now, kernel frees on last release). If
+    the mount is STILL there, raise — proceeding to ``rm -rf`` on a live
+    overlay would wreck the upper dir while reporting the snapshot "pristine",
+    leaking the multi-TB mount and stacking a second overlay on the next run.
+    """
+    for attempt in range(1, attempts + 1):
+        _run(build_umount_command(cfg), check=False)
+        if not is_mounted(cfg):
+            return
+        logger.warning(
+            "umount %s failed (target busy?); retry %d/%d in %.0fs",
+            cfg.merged_dir, attempt, attempts, delay,
+        )
+        time.sleep(delay)
+    logger.warning("falling back to lazy umount (-l) for %s", cfg.merged_dir)
+    _run(_sudo_prefix(cfg) + ["umount", "-l", cfg.merged_dir], check=False)
+    if is_mounted(cfg):
+        raise RuntimeError(
+            f"could not unmount overlay at {cfg.merged_dir}: target is busy — "
+            f"stop the container using it first"
+        )
+
+
 def restore(cfg: OverlayConfig) -> None:
     """Unmount any existing overlay and wipe the scratch dirs.
 
     Tolerant of "already gone" so it is safe to call before every mount and as a
-    standalone teardown. The upper dir may hold root-owned files written by the
-    container, so removal goes through ``rm -rf`` (with sudo) rather than shutil.
+    standalone teardown; a mount that cannot be released raises (see
+    :func:`_umount_with_retry`). The upper dir may hold root-owned files written
+    by the container, so removal goes through ``rm -rf`` (with sudo) rather than
+    shutil.
     """
-    # umount is non-fatal: it fails when nothing is mounted, which is fine.
-    _run(build_umount_command(cfg), check=False)
+    if is_mounted(cfg):
+        _umount_with_retry(cfg)
     for path in (cfg.merged_dir, cfg.upper_dir, cfg.work_dir):
         _run(_sudo_prefix(cfg) + ["rm", "-rf", path], check=False)
 

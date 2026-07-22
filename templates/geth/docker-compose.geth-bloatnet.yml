@@ -46,7 +46,9 @@ services:
     container_name: benchmark_geth
     tty: true
     restart: unless-stopped
-    stop_grace_period: 30s
+    # Geth flushes its pathdb / dirty trie caches on shutdown — a SIGKILL
+    # forces a state regeneration on next boot, so allow a real graceful stop.
+    stop_grace_period: 300s
     environment:
       - TERM=xterm-256color
       - COLORTERM=truecolor

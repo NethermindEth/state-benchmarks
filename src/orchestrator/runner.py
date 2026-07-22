@@ -44,6 +44,14 @@ CONFIG_PATH = "config.yml"
 MOCK_CL_PROC: Optional[subprocess.Popen] = None
 RPC_STARTUP_TIMEOUT = 300
 SYNC_HEAD_FRESHNESS_SEC = 120
+# Absolute wall-clock cap on the sync measurement — a stalled sync must fail
+# the client's run instead of hanging the whole matrix forever.
+SYNC_TIMEOUT_SEC = 86400
+# Grace period for `compose down` before docker SIGKILLs the containers.
+# Nethermind flat-DB needs a long graceful stop (StopAsync flushes the
+# in-memory state snapshot); the compose default of 10s guarantees a kill and
+# a rescan (or worse) on the next boot.
+STOP_TIMEOUT_SEC = 600
 SEED_STATE_FILE = os.path.join("benchmarks", ".seed-state.json")
 # node_exporter scrapes this dir via --collector.textfile.directory (see
 # docker/docker-compose.monitoring.yml).
@@ -245,7 +253,9 @@ def stop_infrastructure():
 
     logger.info("Stopping all containers...")
     try:
-        run_cmd(compose_cmd(CLIENTS_COMPOSE) + ["down", "-v"])
+        # Explicit -t: compose's 10s default SIGKILLs clients that need a long
+        # graceful stop (Nethermind flat-DB flush) — see STOP_TIMEOUT_SEC.
+        run_cmd(compose_cmd(CLIENTS_COMPOSE) + ["down", "-v", "-t", str(STOP_TIMEOUT_SEC)])
     except subprocess.CalledProcessError:
         pass
     try:
@@ -339,15 +349,57 @@ def head_is_fresh(freshness_sec: Optional[int] = None) -> bool:
         return False
     return number > 0 and (time.time() - timestamp) < freshness_sec
 
-def measure_sync_time(poll_interval: int = 10, confirmations: int = 3) -> Optional[float]:
+def sync_head_ok(saw_syncing: bool) -> bool:
+    """Mode-aware "the head looks synced" check.
+
+    Head freshness only makes sense for a live sync (lighthouse): a frozen
+    milestone / snap-pivot / replay target has a historical head whose
+    timestamp is never fresh, so requiring freshness would hang the sync
+    wait forever — exactly the frozen-snapshot case the mock CL exists for.
+    """
+    if CONSENSUS_MODE == "mock":
+        # Frozen pivot: synced when the head reached the configured pivot
+        # (same convention as mock_cl.drivers.PivotDriver._status).
+        block = rpc_call("eth_getBlockByNumber", ["latest", False])
+        if not block:
+            return False
+        try:
+            number = int(block["number"], 16)
+        except (KeyError, TypeError, ValueError):
+            return False
+        pivot_number = (MOCK_CL.get("pivot") or {}).get("number")
+        if pivot_number is not None:
+            return number >= int(pivot_number) - 32
+        return number > 0 and saw_syncing
+    if CONSENSUS_MODE == "none":
+        # Natively-driven frozen sync (e.g. --Sync.StaticSnapPivot): no fresh
+        # head and no pivot config to compare against — trust eth_syncing
+        # having flipped true -> false with a non-zero head.
+        block = rpc_call("eth_getBlockByNumber", ["latest", False])
+        if not block:
+            return False
+        try:
+            number = int(block["number"], 16)
+        except (KeyError, TypeError, ValueError):
+            return False
+        return number > 0 and saw_syncing
+    return head_is_fresh()
+
+def measure_sync_time(poll_interval: int = 10, confirmations: int = 3,
+                      max_seconds: Optional[int] = None) -> Optional[float]:
     """Wall-clock the sync. Returns None if the node never actually synced.
 
     Sync is considered complete only after `confirmations` consecutive polls
-    where eth_syncing is false AND the head block is fresh. If the node never
-    reported syncing (it was already synced, or it can't sync at all because
-    nothing drives its engine API), the measurement is not meaningful and we
-    return None rather than a bogus near-zero duration.
+    where eth_syncing is false AND the head looks synced for the configured
+    consensus mode (see sync_head_ok). If the node never reported syncing (it
+    was already synced, or it can't sync at all because nothing drives its
+    engine API), the measurement is not meaningful and we return None rather
+    than a bogus near-zero duration. A sync still incomplete after
+    `max_seconds` (nodes.sync_timeout_sec) raises instead of hanging the
+    matrix — proceeding to the load test on an unsynced node would produce
+    bogus numbers anyway.
     """
+    max_seconds = max_seconds if max_seconds is not None else SYNC_TIMEOUT_SEC
     logger.info("Waiting for sync to complete. This may take a long time...")
     start_time = time.time()
     saw_syncing = False
@@ -360,7 +412,7 @@ def measure_sync_time(poll_interval: int = 10, confirmations: int = 3) -> Option
             saw_syncing = True
             consecutive_synced = 0
         elif syncing is False:
-            if head_is_fresh():
+            if sync_head_ok(saw_syncing):
                 consecutive_synced += 1
                 if consecutive_synced >= confirmations:
                     break
@@ -373,6 +425,11 @@ def measure_sync_time(poll_interval: int = 10, confirmations: int = 3) -> Option
                         "and will never sync in this configuration. Will keep waiting..."
                     )
                     stale_warned = True
+        if max_seconds and time.time() - start_time >= max_seconds:
+            raise RuntimeError(
+                f"Sync did not complete within {max_seconds}s "
+                f"(nodes.sync_timeout_sec); aborting this client's run."
+            )
         time.sleep(poll_interval)
         logger.info(f"Still syncing... elapsed: {int(time.time() - start_time)}s")
 
@@ -580,7 +637,7 @@ def main():
 
     global CONFIG, RPC_URL, SSH_CMD, MANAGE_INFRA, MONITORING_COMPOSE, CLIENTS_COMPOSE, DATA_DIRS, \
         COMPOSE_CMD, CONSENSUS, CONSENSUS_MODE, MOCK_CL, RPC_STARTUP_TIMEOUT, SYNC_HEAD_FRESHNESS_SEC, \
-        OVERLAY, CONFIG_PATH
+        SYNC_TIMEOUT_SEC, STOP_TIMEOUT_SEC, OVERLAY, CONFIG_PATH
     CONFIG_PATH = args.config
     CONFIG = load_config(args.config)
     nodes_cfg = CONFIG.get("nodes", {})
@@ -606,6 +663,8 @@ def main():
     OVERLAY = CONFIG.get("overlay", {}) or {}
     RPC_STARTUP_TIMEOUT = int(nodes_cfg.get("rpc_startup_timeout_sec", 300))
     SYNC_HEAD_FRESHNESS_SEC = int(nodes_cfg.get("sync_head_freshness_sec", 120))
+    SYNC_TIMEOUT_SEC = int(nodes_cfg.get("sync_timeout_sec", 86400))
+    STOP_TIMEOUT_SEC = int(CONFIG.get("infrastructure", {}).get("stop_timeout_sec", 600))
     COMPOSE_CMD = detect_compose_cmd() if MANAGE_INFRA else ["docker-compose"]
 
     clients_to_run = [args.client] if args.client else nodes_cfg.get("clients", [])

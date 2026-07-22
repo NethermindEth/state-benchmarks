@@ -149,6 +149,71 @@ def test_measure_sync_time_does_not_finish_on_stale_head(caplog):
     assert any("stale" in r.message for r in caplog.records if r.levelno >= 30)
 
 
+def test_measure_sync_time_raises_after_wall_clock_cap():
+    """A stalled sync must fail the run instead of hanging the matrix forever."""
+    fake_clock = iter(range(0, 10_000, 10))
+    with patch("runner.check_sync_status", return_value=True), \
+         patch("runner.time.sleep"), \
+         patch("runner.time.time", side_effect=lambda: next(fake_clock)):
+        with pytest.raises(RuntimeError, match="sync_timeout_sec"):
+            runner.measure_sync_time(poll_interval=0, confirmations=3, max_seconds=30)
+
+
+# ---------- sync_head_ok (mode-aware sync completion) ----------
+
+def test_sync_head_ok_mock_mode_uses_pivot_not_freshness(monkeypatch):
+    """Frozen snapshot: the head is historical (never fresh) — completion is
+    'head reached the configured pivot', mirroring PivotDriver."""
+    monkeypatch.setattr(runner, "CONSENSUS_MODE", "mock")
+    monkeypatch.setattr(runner, "MOCK_CL", {"pivot": {"number": 100}})
+    block = {"number": hex(90), "timestamp": hex(1)}  # ancient timestamp
+    with patch("runner.rpc_call", return_value=block):
+        assert runner.sync_head_ok(saw_syncing=False) is True
+    with patch("runner.rpc_call", return_value={"number": hex(10), "timestamp": hex(1)}):
+        assert runner.sync_head_ok(saw_syncing=True) is False
+
+
+def test_sync_head_ok_mock_mode_without_pivot_number(monkeypatch):
+    monkeypatch.setattr(runner, "CONSENSUS_MODE", "mock")
+    monkeypatch.setattr(runner, "MOCK_CL", {"pivot": {}})
+    block = {"number": hex(50), "timestamp": hex(1)}
+    with patch("runner.rpc_call", return_value=block):
+        assert runner.sync_head_ok(saw_syncing=True) is True
+        assert runner.sync_head_ok(saw_syncing=False) is False
+
+
+def test_sync_head_ok_none_mode_requires_syncing_transition(monkeypatch):
+    """consensus_mode none (e.g. --Sync.StaticSnapPivot): trust the
+    eth_syncing true->false transition with a non-zero head."""
+    monkeypatch.setattr(runner, "CONSENSUS_MODE", "none")
+    block = {"number": hex(50), "timestamp": hex(1)}
+    with patch("runner.rpc_call", return_value=block):
+        assert runner.sync_head_ok(saw_syncing=True) is True
+        assert runner.sync_head_ok(saw_syncing=False) is False
+
+
+def test_sync_head_ok_lighthouse_mode_delegates_to_freshness(monkeypatch):
+    monkeypatch.setattr(runner, "CONSENSUS_MODE", "lighthouse")
+    with patch("runner.head_is_fresh", return_value=True) as fresh:
+        assert runner.sync_head_ok(saw_syncing=True) is True
+    fresh.assert_called_once()
+
+
+# ---------- stop_infrastructure ----------
+
+def test_stop_infrastructure_passes_stop_timeout(monkeypatch):
+    """compose down must carry -t: the 10s default SIGKILLs Nethermind flat-DB
+    mid-flush (rescan / corruption on the next boot)."""
+    monkeypatch.setattr(runner, "MANAGE_INFRA", True)
+    monkeypatch.setattr(runner, "OVERLAY", {})
+    monkeypatch.setattr(runner, "STOP_TIMEOUT_SEC", 600)
+    calls = []
+    with patch("runner.run_cmd", side_effect=lambda cmd, **kw: calls.append(cmd)):
+        runner.stop_infrastructure()
+    clients_down = calls[0]
+    assert clients_down[-4:] == ["down", "-v", "-t", "600"]
+
+
 # ---------- measure_db_size ----------
 
 def test_measure_db_size_parses_du_output():

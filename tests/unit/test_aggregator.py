@@ -72,9 +72,10 @@ def test_query_prometheus_handles_connection_error(mock_get):
 
 @patch("aggregator.query_prometheus")
 def test_gather_omits_unavailable_metrics(mock_query):
-    """Failed queries are omitted from the result, not recorded as zeros."""
+    """Failed queries are omitted from the result (not recorded as zeros) and
+    reported by name in the missing-metrics manifest."""
     mock_query.side_effect = [42.0, None, 7.0]
-    out = aggregator.gather_prometheus_metrics(
+    out, missing = aggregator.gather_prometheus_metrics(
         "geth", "http://prom",
         queries={"cpu": "q1", "rss": "q2"},
         client_queries={"gas_per_sec": "q3"},
@@ -82,6 +83,41 @@ def test_gather_omits_unavailable_metrics(mock_query):
     )
     assert out == {"cpu": 42.0, "gas_per_sec": 7.0}
     assert "rss" not in out
+    assert missing == ["rss"]
+
+
+# ---------- locust_aggregate_metrics (failure-ratio gate) ----------
+
+def _agg_row(request_count=1000, failure_count=0):
+    return {
+        "p50_ms": 2.0, "p95_ms": 4.0, "p99_ms": 7.0, "mean_ms": 2.2,
+        "requests_per_sec": 33.0,
+        "request_count": request_count, "failure_count": failure_count,
+    }
+
+
+def test_locust_aggregate_metrics_healthy_run_passes():
+    metrics, valid = aggregator.locust_aggregate_metrics(_agg_row(failure_count=10), 0.1)
+    assert valid is True
+    assert metrics["rpc_failure_ratio"] == 0.01
+    assert metrics["rpc_p50_latency_ms"] == 2.0
+    assert metrics["rpc_requests_sec"] == 33.0
+
+
+def test_locust_aggregate_metrics_gates_mostly_erroring_run(caplog):
+    """Locust records response times for failed requests too — an all-errors
+    run must not surface its (fast, bogus) latencies as metrics."""
+    metrics, valid = aggregator.locust_aggregate_metrics(_agg_row(failure_count=900), 0.1)
+    assert valid is False
+    assert metrics == {"rpc_failure_ratio": 0.9}
+    assert any("max_failure_ratio" in r.message for r in caplog.records if r.levelno >= 40)
+
+
+def test_locust_aggregate_metrics_zero_requests_no_crash():
+    metrics, valid = aggregator.locust_aggregate_metrics(
+        _agg_row(request_count=0, failure_count=0), 0.1)
+    assert valid is True
+    assert metrics["rpc_failure_ratio"] == 0.0
 
 
 # ---------- parse_locust_stats ----------

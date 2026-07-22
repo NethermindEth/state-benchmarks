@@ -130,3 +130,54 @@ def test_cli_up_is_noop_when_disabled(tmp_path):
 def test_cli_status_when_disabled(tmp_path):
     config_path = _write_config(tmp_path, {"enabled": False})
     assert overlay.main(["status", "--config", config_path]) == 0
+
+
+# ---------- restore: busy-umount handling ----------
+
+def _parsed(**overrides):
+    return overlay.parse_overlay_config(_enabled_cfg(**overrides))
+
+
+def test_restore_skips_umount_when_not_mounted(monkeypatch):
+    cfg = _parsed()
+    cmds = []
+    monkeypatch.setattr(overlay, "_run", lambda cmd, check: cmds.append(cmd) or 0)
+    monkeypatch.setattr(overlay, "is_mounted", lambda _cfg: False)
+    overlay.restore(cfg)
+    assert all("umount" not in cmd for cmd in cmds)
+    assert sum(1 for cmd in cmds if "rm" in cmd) == 3
+
+
+def test_restore_unmounts_then_wipes(monkeypatch):
+    cfg = _parsed()
+    cmds = []
+    mounted = {"v": True}
+
+    def fake_run(cmd, check):
+        cmds.append(cmd)
+        if "umount" in cmd:
+            mounted["v"] = False
+        return 0
+
+    monkeypatch.setattr(overlay, "_run", fake_run)
+    monkeypatch.setattr(overlay, "is_mounted", lambda _cfg: mounted["v"])
+    monkeypatch.setattr(overlay.time, "sleep", lambda *_: None)
+    overlay.restore(cfg)
+    assert cmds[0] == overlay.build_umount_command(cfg)
+    assert sum(1 for cmd in cmds if "rm" in cmd) == 3
+
+
+def test_restore_busy_mount_raises_and_never_wipes(monkeypatch):
+    """A persistently busy overlay must surface a real failure — rm -rf on a
+    live multi-TB overlay would wreck the upper dir while reporting the
+    snapshot 'pristine' and stack a second mount on the next run."""
+    cfg = _parsed()
+    cmds = []
+    monkeypatch.setattr(overlay, "_run", lambda cmd, check: cmds.append(cmd) or 0)
+    monkeypatch.setattr(overlay, "is_mounted", lambda _cfg: True)
+    monkeypatch.setattr(overlay.time, "sleep", lambda *_: None)
+    with pytest.raises(RuntimeError, match="busy"):
+        overlay.restore(cfg)
+    # Retried, fell back to lazy umount, and never ran rm -rf.
+    assert any("-l" in cmd for cmd in cmds)
+    assert all("rm" not in cmd for cmd in cmds)

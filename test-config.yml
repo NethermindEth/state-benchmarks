@@ -45,12 +45,12 @@ metrics:
       gas_per_sec:    'chain_mgasps{quantile="0.5"} * 1e6'
 
   regression_threshold: 0.25
+  max_failure_ratio: 0.1
+  # Only true throughput metrics — IO/net stay lower-is-better (more usually
+  # means thrashing at a fixed workload).
   higher_is_better:
     - "rpc_requests_sec"
     - "gas_per_sec"
-    - "disk_throughput_peak_bytes_per_sec"
-    - "disk_iops_peak"
-    - "net_rx_bytes_per_sec_peak"
 
 load_test:
   run_time: "30s"

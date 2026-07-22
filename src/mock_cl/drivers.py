@@ -14,6 +14,11 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
+try:
+    from .engine import newpayload_version_for_fork
+except ImportError:  # pragma: no cover - flat sys.path layout
+    from engine import newpayload_version_for_fork
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,7 +143,8 @@ class ReplayDriver:
         self.stop_event = stop_event
         # When set, forces engine_newPayload version for ALL records (overriding the
         # per-record newpayload_version); these are Prague blocks whose auto-pick
-        # otherwise lands on V3. None => fall back to each record's version (or auto).
+        # otherwise lands on V3. None => per-record version, then the record's
+        # fork name, then the engine's shape-based auto-pick.
         self.newpayload_version = newpayload_version
         # How long to poll FCU for a SYNCING (async-queued) block to land before
         # giving up. Deliberately its own knob: the engine's per-request timeout
@@ -152,6 +158,7 @@ class ReplayDriver:
         new_payload_ms: List[float] = []
         fcu_ms: List[float] = []
         sync_wait_ms: List[float] = []
+        prev_hash: Optional[str] = None
 
         for i, record in enumerate(self.records):
             if self.count is not None and i >= self.count:
@@ -159,7 +166,42 @@ class ReplayDriver:
             if self.stop_event is not None and self.stop_event.is_set():
                 break
 
-            version = self.newpayload_version or record.newpayload_version
+            # Validate parentHash chaining before touching the engine: a gapped
+            # / off-by-one payload file makes every newPayload return SYNCING
+            # (parent unknown) and the FCU poll spin fcu_wait_seconds per block
+            # — a multi-hour silent hang that mis-measures every block.
+            parent = record.payload.get("parentHash")
+            if prev_hash is None:
+                # First record: the EL must already know its parent (the file
+                # must start at snapshot head + 1). FCU to a known hash returns
+                # VALID (an ancestor just reorgs — harmless under overlay);
+                # an unknown hash returns SYNCING, which is the gapped base.
+                # Skipped when advance_head is off — that mode promises not to
+                # touch the head, and an FCU could reorg it.
+                if self.advance_head:
+                    base = self.engine.forkchoice_updated(head=parent)
+                    base_status = ((base or {}).get("payloadStatus") or {}).get("status")
+                    if base_status != "VALID":
+                        raise RuntimeError(
+                            f"payload file base mismatch: EL does not recognize the first "
+                            f"payload's parent {parent} (block {record.block_number}, FCU "
+                            f"status {base_status}); the file must start at snapshot head + 1"
+                        )
+            elif parent != prev_hash:
+                raise RuntimeError(
+                    f"payload chain gap at block {record.block_number}: "
+                    f"parentHash {parent} != previous blockHash {prev_hash}"
+                )
+            prev_hash = record.block_hash
+
+            # Explicit override > per-record version > the record's fork name
+            # (Cancun/Prague payloads are shape-identical, so the engine's
+            # auto-pick can't tell them apart) > engine auto-pick.
+            version = (
+                self.newpayload_version
+                or record.newpayload_version
+                or newpayload_version_for_fork(record.fork)
+            )
             t0 = time.perf_counter()
             np_result = self.engine.new_payload(
                 record.payload,
@@ -183,12 +225,20 @@ class ReplayDriver:
                 raise RuntimeError(message)
 
             status = (np_result or {}).get("status")
-            if status == "INVALID":
-                _fail(status, f"newPayload returned INVALID at block {record.block_number}: {np_result}")
+            if status not in ("VALID", "ACCEPTED", "SYNCING"):
+                # INVALID, INVALID_BLOCK_HASH, a None/unmodeled status, or a
+                # null result all mean the block did NOT import — silently
+                # recording the row and skipping the FCU would leave the head
+                # at the snapshot base while the CSV looks full (a bogus run).
+                _fail(
+                    str(status) if status is not None else "NO_STATUS",
+                    f"newPayload returned unexpected status {status!r} at block "
+                    f"{record.block_number}: {np_result}",
+                )
 
             fcu_ms_val: Optional[float] = None
             sync_wait_ms_val: Optional[float] = None
-            if status in ("VALID", "ACCEPTED", "SYNCING") and self.advance_head:
+            if self.advance_head:
                 # SYNCING = the EL queued the block for async processing (Nethermind
                 # does this for heavy bloat blocks). An FCU sent now is a no-op for
                 # the head, so poll FCU until the payload lands (VALID) — otherwise
