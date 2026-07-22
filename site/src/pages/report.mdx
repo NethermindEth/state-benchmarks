@@ -1,0 +1,187 @@
+---
+layout: ../layouts/BaseLayout.astro
+title: Report
+description: End-of-grant report — outcomes, recommendations, and all deliverables (PRs, tooling, plugin, benchmarking harness, uploaded states).
+---
+
+<div class="prose-site mx-auto max-w-4xl px-6 py-16">
+
+# End-of-Grant Report — State Bloating & EL Benchmarking
+
+**Project:** State Benchmarks — Ethereum execution-layer performance at 10× mainnet state
+**Grant lead:** Marcin Sobczak · **Team:** Daniil Ankushin, Dmytro Biloshytskyi · **EF contact:** Marius van der Wijden
+**Repository:** [NethermindEth/state-benchmarks](https://github.com/NethermindEth/state-benchmarks) · **Results site:** [nethermindeth.github.io/state-benchmarks](https://nethermindeth.github.io/state-benchmarks)
+**Status:** ✅ Concluded — all milestones met (confirmed with EF on 2026-07-22).
+
+---
+
+## 1. Executive summary
+
+We bloated a **real mainnet snapshot to 10.03× (2.22 TB)** with mainnet-faithful composition and benchmarked two execution clients (Nethermind, Geth) end-to-end — generation, snap-sync, execution, and witness sizing — reproducing every milestone bit-for-bit against the canonical state root.
+
+**Headline:** *a 10× state is not a 10× cost.* What strains clients is **gas throughput and a few giant contracts**, not the size of the state — trie depth and proof size stay almost flat (log-bounded). All the tooling, data, and client fixes are open and reusable for future forks.
+
+---
+
+## 2. Outcomes
+
+1. **Clients hold at 10× — no collapse.** Both clients executed, served RPC reads, and snap-synced the full 10× state. No performance cliff between 1× and 10×; the strain that appeared tracked **gas throughput**, not state size.
+2. **Trie depth grows as log₁₆(N) — witnesses stay tiny.** Account-trie depth follows `log₁₆(N)` (R² = 0.99998); the whole 1×→10× climb adds under 1 level (7.61 → 8.45). A single account proof grows **+11%** over 1×→10× (**~+21%** extrapolated to 100×). This is the real-state MPT baseline for any binary-tree migration (EIP-7864).
+3. **Snap sync is linear — but one giant trie is the wall.** ~100 GB/h (Nethermind) / ~47 GB/h (Geth) from a single peer; a full 10× sync takes 27–46 h, bit-exact. One giant-contract storage trie took **~9 h — a third of the entire 10× sync** — as a non-parallelisable sequential chain (Amdahl).
+4. **Every state is reproducible and verifiable.** Each milestone is generated through the real Engine-API state-transition path, replayable by any client and verifiable against the state root. The tooling is a ready state-scale regression suite for devnets and CI.
+
+## 3. Recommendations for core developers
+
+| Track | Recommendation |
+|---|---|
+| Harden L1 · Resilience | **Make giant-contract snap sync parallelisable** (primary ask). A complementary lever is pricing — building such a trie is gas-metered (~20 k gas/slot), but that one-time cost doesn't reflect the permanent per-node sync/storage burden. |
+| Harden L1 · Interop | **Fix p2p body sizing before large blocks** — at 8-Ggas blocks, bodies reach 26–47 MB and overflow the 16 MB devp2p / 24-bit RLPx frame (fixed & merged in Nethermind #12059). |
+| Scale · Glamsterdam | **Reprice on state accesses, not proof bytes** — the witness is log-flat in size, so a block's witness ≈ (state accesses) × (roughly constant per-access cost). |
+| Harden L1 | **Add snap-serving peers** — the box sat ~80% idle at 5×; the ceiling is single-peer request concurrency, not hardware. |
+
+Public write-up: **[Outcomes & Recommendations](/outcomes)** · full measured data: **[Results](/results)**.
+
+---
+
+## 4. Deliverables
+
+### 4.1 Public results site
+
+Open, reproducible site with all measured data, interactive charts, and the outcomes/recommendations:
+
+- **Results & data:** [/results](/results)
+- **Outcomes & recommendations:** [/outcomes](/outcomes)
+- Source: `site/` in the repo (Astro + Tailwind, deploys via GitHub Pages).
+
+### 4.2 Bloating tooling
+
+| Component | What it is | Where |
+|---|---|---|
+| **Go bloating orchestrator** | Closed-loop controller that steers state composition to a mainnet-faithful target and records the payload stream for replay | eth-perf-research [#77](https://github.com/NethermindEth/eth-perf-research/pull/77) |
+| **`testing_commitBlockV1`** | Engine-API-adjacent RPC to commit a bloated block on the chain head through the real EVM/STF/flush path | Nethermind [#11385](https://github.com/NethermindEth/nethermind/pull/11385), [#11280](https://github.com/NethermindEth/nethermind/pull/11280), [#11593](https://github.com/NethermindEth/nethermind/pull/11593), [#11981](https://github.com/NethermindEth/nethermind/pull/11981); upstream execution-apis [#787](https://github.com/ethereum/execution-apis/pull/787) |
+| **State scanner (Go sidecar)** | Reads Nethermind's RocksDB in secondary mode to produce exact node-type + depth metrics; cross-checked vs `geth db inspect-trie` | eth-perf-research [#77](https://github.com/NethermindEth/eth-perf-research/pull/77) |
+| **Mock consensus layer** | Engine-API forkchoice driver for frozen-milestone snap-sync + replay (no real CL) | state-benchmarks [#36](https://github.com/NethermindEth/state-benchmarks/pull/36) |
+
+Faster bloating than Spamoor / Geth trie-scan via incremental state updates and fast scanning.
+
+### 4.3 Nethermind plugin (StateDiffsWriter) & instrumentation
+
+| Component | What it is | PR |
+|---|---|---|
+| **StateDiffsWriter plugin** | Trie-diff composition tracking out of the engine (diff-only + Go sidecar) — the production sensor | [#11788](https://github.com/NethermindEth/nethermind/pull/11788) (replaces StateComposition [#10995](https://github.com/NethermindEth/nethermind/pull/10995), [#11382](https://github.com/NethermindEth/nethermind/pull/11382), [#11586](https://github.com/NethermindEth/nethermind/pull/11586)) |
+| **`proof_getProofWithMeta`** | JSON-RPC method for witness instrumentation (proof bytes + node lookups + depth) | [#11498](https://github.com/NethermindEth/nethermind/pull/11498) |
+| **HistoryPruner self-bootstrap** | Supporting fix for the bloating pipeline | [#11254](https://github.com/NethermindEth/nethermind/pull/11254) |
+
+### 4.4 Benchmarking tooling
+
+| Component | What it is | Where |
+|---|---|---|
+| **Custom benchmarking harness** | One-command, reproducible: parallel snapshot download/unpack, mock-tool block application + RPC under high load, overlay-FS between runs, integrated monitoring (Prometheus / Grafana / cAdvisor). Built because existing tools didn't measure state under realistic workload | Team deliverable (repo link TBD) |
+| **Locust-based benchmarking framework** | Load-testing framework for RPC/throughput | state-benchmarks [#34](https://github.com/NethermindEth/state-benchmarks/pull/34) |
+| **Cross-EL replay** | Engine-API replay (newPayload + FCU) with external RSS mem-gate to reproduce a milestone on any client | eth-perf-research [#77](https://github.com/NethermindEth/eth-perf-research/pull/77) |
+| **Spamoor → EEST migration** | `spamoor` + `testing_build_block` test kinds for the spec test suite | execution-specs [#2746](https://github.com/ethereum/execution-specs/pull/2746) |
+
+### 4.5 Upstream contributions — all PRs
+
+**Repositories:** NethermindEth/state-benchmarks · NethermindEth/eth-perf-research · NethermindEth/nethermind · ethereum/go-ethereum · ethereum/execution-apis · ethereum/execution-specs.
+
+**Snap-sync (serving, fixed pivot, interop)**
+
+| PR | Title | Status |
+|---|---|---|
+| nethermind [#11943](https://github.com/NethermindEth/nethermind/pull/11943) | `Sync.StaticSnapPivot` — fixed-pivot snap sync from a frozen peer | merged |
+| nethermind [#12059](https://github.com/NethermindEth/nethermind/pull/12059) | Cap outgoing block bodies under the devp2p message-size limit | merged |
+| nethermind [#11050](https://github.com/NethermindEth/nethermind/pull/11050) | Snap-serving fixes ×4 (path-group limit, ISnapServer DI, CLI override, 2 MB limit) | merged |
+| nethermind [#12263](https://github.com/NethermindEth/nethermind/pull/12263) | Flat-serve snap account ranges from a frozen/restored head | closed (draft) |
+| go-ethereum [#35265](https://github.com/ethereum/go-ethereum/pull/35265) | `--snap.exactpivot` — exact-head snap sync | open |
+| go-ethereum [#35189](https://github.com/ethereum/go-ethereum/pull/35189) | `--snap.skipreceipts` — state-only snap sync | open |
+
+**Bloating engine (`testing_commitBlockV1`) & FCU**
+
+| PR | Title | Status |
+|---|---|---|
+| nethermind [#11385](https://github.com/NethermindEth/nethermind/pull/11385) | `testing_commitBlockV1` — commit a block on the chain head | merged |
+| nethermind [#11981](https://github.com/NethermindEth/nethermind/pull/11981) | Produce `testing_commitBlockV1` blocks on the main world state | merged |
+| nethermind [#11593](https://github.com/NethermindEth/nethermind/pull/11593) | Skip duplicate processing in `testing_commitBlockV1` | merged |
+| nethermind [#11280](https://github.com/NethermindEth/nethermind/pull/11280) | Serialize `testing_commitBlockV1` payload with EthereumJsonSerializer | merged |
+| nethermind [#11746](https://github.com/NethermindEth/nethermind/pull/11746) | Validate FCU safe/finalized by ancestry when markers are outdated | merged |
+| nethermind [#11681](https://github.com/NethermindEth/nethermind/pull/11681) | Fix forkchoice-update (FCU) validation order | merged |
+| nethermind [#11254](https://github.com/NethermindEth/nethermind/pull/11254) | HistoryPruner: self-bootstrap in TryPruneHistory | merged |
+| execution-apis [#787](https://github.com/ethereum/execution-apis/pull/787) | Add `testing_commitBlockV1` RPC method (upstream standardisation) | open |
+| execution-apis [#710](https://github.com/ethereum/execution-apis/pull/710) | `testing_buildBlockV1` (earlier RPC, superseded by #787) | closed |
+
+**State sensor / plugin & witness instrumentation**
+
+| PR | Title | Status |
+|---|---|---|
+| nethermind [#11788](https://github.com/NethermindEth/nethermind/pull/11788) | StateDiffsWriter — replace StateComposition (diff-only + Go sidecar) | merged |
+| nethermind [#10995](https://github.com/NethermindEth/nethermind/pull/10995) | StateComposition plugin — real-time state metrics (original sensor) | merged |
+| nethermind [#11382](https://github.com/NethermindEth/nethermind/pull/11382) | statecomp: serialize empty histograms, bootstrap on first new head | merged |
+| nethermind [#11586](https://github.com/NethermindEth/nethermind/pull/11586) | StateComposition: refuse to publish a partial-scan baseline | merged |
+| nethermind [#11498](https://github.com/NethermindEth/nethermind/pull/11498) | Add `proof_getProofWithMeta` JSON-RPC method (witness instrumentation) | merged |
+| nethermind [#12507](https://github.com/NethermindEth/nethermind/pull/12507) | Bound `eth_getProof` with the request timeout | merged |
+| nethermind [#12521](https://github.com/NethermindEth/nethermind/pull/12521) | Bound `proof_getProofWithMeta` with the request timeout | merged |
+
+**Read-path / large-state performance** *(the #12348 stack; post-2026-07-09)*
+
+| PR | Title | Status |
+|---|---|---|
+| nethermind [#12400](https://github.com/NethermindEth/nethermind/pull/12400) | Read-path caching, bundle retention, byte-capped snapshot window | open |
+| nethermind [#12401](https://github.com/NethermindEth/nethermind/pull/12401) | Persist via SST ingestion (opt-in) | open |
+| nethermind [#12402](https://github.com/NethermindEth/nethermind/pull/12402) | Paced GC + gen0 fission to cut read-path GC pauses at gigagas | open |
+| nethermind [#12403](https://github.com/NethermindEth/nethermind/pull/12403) | Log RocksDB per-column native-memory breakdown | open |
+| nethermind [#12404](https://github.com/NethermindEth/nethermind/pull/12404) | Experimental flat node storage — shared slab arena (default off) | open |
+| nethermind [#12429](https://github.com/NethermindEth/nethermind/pull/12429) | Guard the trie-warmer against a recycle race (storage reads as 0x00) | open |
+| nethermind [#12348](https://github.com/NethermindEth/nethermind/pull/12348) | Parent read-path PR (split into #12400–04) | closed |
+
+**Tooling / infrastructure**
+
+| PR | Title | Status |
+|---|---|---|
+| state-benchmarks [#36](https://github.com/NethermindEth/state-benchmarks/pull/36) | Mock consensus layer (Engine-API driver) for snap-sync + replay | merged |
+| state-benchmarks [#34](https://github.com/NethermindEth/state-benchmarks/pull/34) | Locust-based benchmarking framework | merged |
+| eth-perf-research [#77](https://github.com/NethermindEth/eth-perf-research/pull/77) | Go bloating orchestrator + sidecar + cross-EL replay | draft |
+| eth-perf-research [#39](https://github.com/NethermindEth/eth-perf-research/pull/39) | Dagu session-orchestrator configs | merged |
+| execution-specs [#2746](https://github.com/ethereum/execution-specs/pull/2746) | Spamoor → EEST migration (spamoor + testing_build_block test kinds) | draft |
+
+### 4.6 Uploaded states (EF / ethpandaops infrastructure)
+
+Bloated datadirs uploaded to ethpandaops S3 (`snapshots.ethpandaops.io`, Cloudflare-fronted, no directory listing; `networkid = 12159`). Direct download links:
+
+| Client | Milestone | Block | Snapshot |
+|---|---|---|---|
+| Nethermind | 5× | 24,546,596 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-5x-mainnet/nethermind/24546596/snapshot.tar.zst) |
+| Geth | 5× | 24,546,596 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-5x-mainnet/geth/24546596/snapshot.tar.zst) |
+| Nethermind | 7× | 24,641,589 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-7x-mainnet/nethermind/24641589/snapshot.tar.zst) |
+| Geth | 7× | 24,641,589 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-7x-mainnet/geth/24641589/snapshot.tar.zst) |
+| Nethermind | 10× | 24,759,769 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-10x-mainnet/nethermind/24759769/snapshot.tar.zst) |
+| Geth | 10× | 24,759,769 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-10x-mainnet/geth/24759769/snapshot.tar.zst) |
+| Reth | 5× | 24,546,596 | [download](https://snapshots.ethpandaops.io/perf-devnet-3-5x-mainnet/reth/24546596/snapshot.tar.zst) |
+
+Canonical state roots — 5× `0x45270c96…930be933`, 7× `0x232a7e56…0ef5ec93`, 10× `0x5560e21c…24d571f0` (5× head hash `0x90e38fba…360a23db0d`). The recorded **payload streams** additionally regenerate any milestone (x3.5 → x10) on any execution client via Engine-API replay.
+
+> URLs given directly by ethpandaops: NM 5×/7×/10× and Geth 5×. Geth 7×/10× and Reth 5× follow the identical path scheme (uploads confirmed in the thread) — verify the exact Reth block if needed. Coordinate with Raphael (Pandops) to keep the payloads archived.
+
+---
+
+## 5. Reproducibility & limitations
+
+- **Reproducible:** every milestone is verifiable bit-for-bit against its canonical state root; the payload stream + tooling reproduces any state on any client.
+- **Client coverage:** Nethermind and Geth fully benchmarked; Besu, Erigon, and Reth partially covered.
+- **Sync times** are single-peer lab numbers, not real-world (real syncs pull from many peers).
+- **Some downstream numbers are projections** (the binary-tree proving factor, specific gas constants) and should be verified before external citation.
+
+## 6. Closure checklist
+
+- [ ] **[Marius]** Confirm EF's updated grant-closure procedure and the required reporting steps.
+- [ ] **[Kamil/Marcin]** File the closure paperwork / grant review per that procedure.
+- [ ] **[Team]** Share all data + tool links via **Telegram** and attach this report.
+- [ ] **[Team → Raphael/Pandops]** Zip and archive the snapshot payloads in the custom placements.
+- [x] Snapshot download URLs filled in (§4.6). **[Team]** still to add the benchmarking-harness repo link (§4.4) and verify the Reth 5× URL/block.
+- [ ] Continued snapshot access retained for future replication (Marius) and the upcoming binary-trie transition work.
+
+---
+
+*Generated 2026-07-22 from the project results site, the merged/open PR set, and the 2026-07-22 grant-report meeting. Milestones mainnet → 10.03× on a real mainnet snapshot; clients Nethermind and Geth.*
+
+</div>
