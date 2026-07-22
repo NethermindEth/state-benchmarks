@@ -18,7 +18,7 @@ const outcomes = [
   {
     n: '01',
     h: 'Clients hold at 10× — no collapse',
-    p: `Both tested clients (Nethermind and Geth) executed blocks, served RPC reads, and snap-synced the full 10× state — 2.22 TB, 10.03× mainnet. There is no sudden performance cliff anywhere between 1× and 10×. The fear that a large state simply breaks execution did not materialise.`,
+    p: `Both tested clients (Nethermind and Geth) executed blocks, served RPC reads, and snap-synced the full 10× state — 2.22 TB, 10.03× mainnet. There is no sudden performance cliff anywhere between 1× and 10×. The strain that did appear tracked gas throughput, not state size: push ~8 Ggas through a block and things break, but the size of the state itself does not.`,
     tag: 'no cliff, 1×→10×',
   },
   {
@@ -36,7 +36,7 @@ const outcomes = [
   {
     n: '04',
     h: 'Every state is reproducible and verifiable',
-    p: `Each milestone is generated through the real Engine-API state-transition path, so any client can replay it and verify it against the state root, bit for bit. The bloat / scan / snap / replay tooling is reusable for every future fork — a ready state-scale regression suite for devnets and CI.`,
+    p: `Each milestone is generated through the real Engine-API state-transition path, so any client can replay it and verify it against the state root, bit for bit. The tooling — bloat / scan / snap / replay plus a one-command benchmarking harness (parallel snapshot download, overlay-FS between runs, integrated Prometheus / Grafana monitoring) — is reusable for every future fork, a ready state-scale regression suite for devnets and CI.`,
     tag: 'reusable tooling',
   },
 ];
@@ -52,8 +52,8 @@ const recs = [
   {
     track: 'Harden L1 · Resilience',
     sev: 'plan',
-    h: 'Price the sync burden of giant storage contracts',
-    p: `One mega-contract storage trie is the snap-sync bottleneck — a third of the 10× sync, and non-parallelisable. Building one is not cheap (each new slot costs ~20,000 gas), but that gas is a one-time payment while the serial sync and permanent storage it forces on every node are not — the classic state-growth mispricing. Super-linear storage repricing or a per-contract storage-growth cap would price that in and shorten the sync tail.`,
+    h: 'Make giant-contract snap sync parallelisable',
+    p: `The snap-sync bottleneck is a single giant-contract storage trie — a third of the 10× sync, downloaded as one non-parallelisable sequential chain (Amdahl's law). The primary ask is client-side: make giant-contract snap sync faster or parallelisable. A complementary lever is pricing — building such a trie is gas-metered (~20,000 gas per new slot), but that one-time cost doesn't reflect the permanent per-node sync and storage burden, so super-linear storage repricing or a per-contract cap would also shorten the tail.`,
   },
   {
     track: 'Harden L1 · Interop',
@@ -83,7 +83,7 @@ const recs = [
   <Section
     eyebrow="Outcomes & Recommendations"
     title="A 10× state is not a 10× cost."
-    intro="We bloated a real mainnet snapshot to 10.03× and benchmarked two execution clients end-to-end. The costs that actually grow are memory pressure and a few giant contracts — not tree depth or proof size, which stay almost flat. Here is what that means for core developers."
+    intro="We bloated a real mainnet snapshot to 10.03× and benchmarked two execution clients end-to-end. What strains clients is gas throughput and a few giant contracts — not the size of the state, whose depth and proof costs stay almost flat. Here is what that means for core developers."
   >
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
       <Stat measured value={`${(mx.totalGB / m1.totalGB).toFixed(2)}×`} label="State reached" sub={`${fmtTB(mx.totalGB)} · mainnet-faithful`} />
