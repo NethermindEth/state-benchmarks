@@ -1,0 +1,109 @@
+# Nethermind bloatnet node backed by a pre-synced x3.5 snapshot on the host's disk.
+#
+# Self-contained template — start_infra.sh (in this directory) brings this up
+# together with docker-compose.monitoring.yml and points it at
+# templates/nethermind/.env.nethermind. config_nethermind.yml in this directory
+# has infrastructure.manage: false so the orchestrator does NOT touch docker —
+# this script-managed stack is the canonical lifecycle.
+#
+# Conventions kept so the rest of the pipeline works unchanged:
+#   - service name "nethermind"        -> Prometheus scrape target nethermind:6060
+#   - container benchmark_nethermind   -> cAdvisor queries + runner's du-based DB sizing
+#   - shared benchmark_net network     -> monitoring stack can reach the node
+#
+# Bloatnet specifics (this is a mainnet SHADOWFORK, not vanilla mainnet):
+#   - chainId stays 1 (shadowfork), but the p2p network id is 12159, set via
+#     --Init.NetworkId. The fork schedule comes from the mounted chainspec.
+#   - The image MUST match the one that produced the snapshot's FlatDb state
+#     (nethermindeth/nethermind:deep-states-turn) or the DB won't open.
+#
+# P2P is fully disabled: the snapshot is the canonical state and the benchmark
+# advances head via the mock-CL engine-API replay, not from network peers.
+#
+# Snapshot isolation: when overlay.enabled is set in config_nethermind.yml,
+# start_infra.sh mounts an overlayfs over the snapshot and exports
+# NETHERMIND_DB_PATH=<scratch>/merged, so the bind below points at the overlay
+# and the mock-CL replay's writes never mutate the pristine snapshot. The
+# snapshot is restored before every run. See src/orchestrator/overlay.py.
+#
+# Host paths default to the x3.5 snapshot layout; override the NETHERMIND_*
+# variables in templates/nethermind/.env.nethermind if the host layout differs.
+# Host ports avoid anything already on 8545/8551 (e.g. another co-located node):
+# RPC 8547, engine 8552, metrics 6060.
+
+name: benchmark-clients
+
+networks:
+  default:
+    name: benchmark_net
+
+services:
+  nethermind:
+    image: ${NETHERMIND_IMAGE:-nethermindeth/nethermind:deep-states-turn}
+    container_name: benchmark_nethermind
+    tty: true
+    restart: unless-stopped
+    # Nethermind flat-DB flushes its in-memory state snapshot on StopAsync —
+    # a SIGKILL means a 1-2h rescan (or corruption) on next boot of big
+    # datadirs, so give the graceful stop real time to finish.
+    stop_grace_period: 600s
+    environment:
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+    volumes:
+      - ${NETHERMIND_DB_PATH:-/mnt/bigdata/neth-x35-24358000-benchmark/mainnet}:/nethermind/data/nethermind_db/mainnet
+      - ${NETHERMIND_CHAINSPEC_PATH:-/mnt/bigdata/cl-config/chainspec.json}:/chainspec.json:ro
+      # JWT is infrastructure, NOT snapshot data — the repo-tracked docker/jwtsecret,
+      # resolved relative to this compose file (same file the mock-CL replay uses).
+      - ${NETHERMIND_JWT_PATH:-../../docker/jwtsecret}:/jwt:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8547}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8552}:8551"
+      - "${BIND_ADDR:-127.0.0.1}:${NETHERMIND_METRICS_PORT:-6060}:6060" # Metrics
+    command:
+      - --config=mainnet
+      - --datadir=/nethermind/data
+      # The chainId comes from the mounted chainspec, NOT from here — the
+      # ethpandaops bloatnet is a mainnet shadowfork (chainId 1, p2p network id
+      # 12159). Internally-generated x7/x10 bloat payloads are EIP-155-signed
+      # with chainId 12159: replaying them against a chainId-1 chainspec
+      # returns newPayload INVALID "invalid chain ID". For those, point
+      # NETHERMIND_CHAINSPEC_PATH at the x7/x10 chainspec (chainId 12159) and
+      # set NETHERMIND_NETWORK_ID to match — both in .env.nethermind.
+      - --Init.ChainSpecPath=/chainspec.json
+      - --Init.NetworkId=${NETHERMIND_NETWORK_ID:-12159}
+      # FlatDb state layout the snapshot was written with — must match the image.
+      - --FlatDb.Enabled=true
+      # Queryable historical-state window for FlatDb: eth_getStorageAt/eth_call
+      # against a block older than this return "No state available"
+      # (FlatDbManager.GatherReadOnlySnapshotBundle). The steady-state depth
+      # tracks MinReorgDepth. Each retained block keeps a state-snapshot bundle in
+      # memory, so deep windows are expensive: 1024/2048 caused unbounded RSS growth
+      # on long runs, hence the modest 128/256 here. The load test copes via
+      # config_nethermind.yml's small recent_block_window (64), frequent re-pinning
+      # (block_window_refresh_sec: 5) and the min_pinned_window "latest" fallback.
+      # Raise these only for a wider pinned window, and budget the memory for it.
+      - --FlatDb.MinReorgDepth=128
+      - --FlatDb.MaxReorgDepth=256
+      - --Init.MemoryHint=8000000000
+      - --Pruning.Mode=None
+      - --JsonRpc.Enabled=true
+      - --JsonRpc.Host=0.0.0.0
+      - --JsonRpc.Port=8545
+      - --JsonRpc.EnabledModules=[Eth,Net,Web3,Admin,Debug]
+      - --JsonRpc.EngineHost=0.0.0.0
+      - --JsonRpc.EnginePort=8551
+      - --JsonRpc.JwtSecretFile=/jwt
+      # 1B-gas bloat blocks can exceed the 30MB default request body limit.
+      - --JsonRpc.MaxRequestBodySize=300000000
+      # P2P fully disabled — the snapshot is the canonical state and the
+      # benchmark advances head via the mock-CL replay, not from peers.
+      - --Sync.SnapSync=false
+      - --Network.MaxActivePeers=0
+      - --Network.OnlyStaticPeers=true
+      - --Init.DiscoveryEnabled=false
+      - --Blocks.TargetBlockGasLimit=1000000000
+      - --TxPool.Size=10000
+      - --Metrics.Enabled=true
+      - --Metrics.ExposePort=6060
+      - --log=${NETHERMIND_LOG_LEVEL:-INFO}

@@ -1,0 +1,152 @@
+# Benchmark config for the Nethermind x3.5 bloatnet template.
+#
+# Differences from the repo-root config_nethermind.yml:
+#   - infrastructure.manage: false       (start_infra.sh owns the lifecycle)
+#   - clients: ["nethermind"], consensus_mode: "none" — the bloatnet snapshot is
+#     already at head, so we REPLAY (run_benchmark.sh / mock_cl directly), not
+#     pivot-sync; keeping consensus_mode none stops the runner touching the CL.
+#   - rpc_url on :8547 (avoids anything already on host 8545/8551).
+#   - disk_iops_peak / disk_throughput_peak wrapped in sum() so the aggregator
+#     records the device-aggregate peak, not an arbitrary per-device series.
+
+infrastructure:
+  manage: false
+  ssh_command: ""
+  # Unused when manage=false but kept for reference / `--phase sync` reruns.
+  compose_paths:
+    monitoring: "templates/nethermind/docker-compose.monitoring.yml"
+    clients: "templates/nethermind/docker-compose.nethermind-bloatnet.yml"
+
+nodes:
+  rpc_url: "http://localhost:8547"
+  consensus: false
+  consensus_mode: "none"
+  rpc_startup_timeout_sec: 300
+  sync_head_freshness_sec: 120
+  clients:
+    - "nethermind"
+  data_dirs:
+    nethermind: "/nethermind/data/nethermind_db/mainnet"
+    geth: "/data"
+    besu: "/opt/besu/data"
+    reth: "/root/.local/share/reth"
+    erigon: "/home/erigon/.local/share/erigon"
+
+metrics:
+  # Fallback only — PROMETHEUS_PORT/PROMETHEUS_URL from .env.nethermind take precedence.
+  prometheus_url: "http://localhost:9092"
+  sync_window: "1h"
+  load_window: "5m"
+
+  # Cross-client container/host queries. {client} -> "benchmark_<client>",
+  # {window} -> sync_window or load_window depending on phase.
+  queries:
+    cpu_percent_peak: 'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    cpu_percent_sustained: 'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    rss_peak_bytes: 'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes: 'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec: 'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak: 'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    net_rx_bytes_per_sec_avg: 'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    disk_iops_peak: 'max_over_time(sum(rate(container_fs_reads_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time(sum(rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+
+  client_queries:
+    nethermind:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(nethermind_blocks_gas_used[{window}])"
+    geth:
+      # Geth emits go-metrics summaries, not histograms. chain_inserts = TOTAL
+      # block-import time; chain_execution is only the EVM-execution phase of it
+      # (~40-60% at bloatnet scale) — using it here understated geth block-proc
+      # by ~2x vs Nethermind's full-pipeline gauge (fixed 2026-07-10).
+      # chain_inserts is a ResettingTimer (quantiles cover only the last scrape
+      # interval), so wrap in avg_over_time to cover {window}. gas_per_sec:
+      # geth has no cumulative gas counter — chain_mgasps is per-block
+      # EXECUTION throughput (Mgas/s), not directly comparable to nethermind's
+      # wall-clock rate(...gas_used).
+      block_proc_p50: 'avg_over_time(chain_inserts{quantile="0.5"}[{window}]) / 1e9'
+      block_proc_p95: 'avg_over_time(chain_inserts{quantile="0.95"}[{window}]) / 1e9'
+      block_proc_p99: 'avg_over_time(chain_inserts{quantile="0.99"}[{window}]) / 1e9'
+      gas_per_sec: 'avg_over_time(chain_mgasps{quantile="0.5"}[{window}]) * 1e6'
+
+  regression_threshold: 0.25
+
+  # Above this aggregate Locust failure ratio the run's rpc_* metrics are
+  # suppressed (a mostly-erroring run would otherwise read as fast).
+  max_failure_ratio: 0.1
+
+  # Only TRUE throughput metrics — at a fixed workload more disk IOPS /
+  # network traffic usually means thrashing (worse), so IO/net metrics stay
+  # lower-is-better.
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+
+load_test:
+  run_time: "10m"
+  users: 50
+  spawn_rate: 10
+  wait_time:
+    min: 0.1
+    max: 0.5
+  gas_tests_enabled: false
+  task_weights:
+    eth_getBalance: 3
+    eth_getStorageAt: 3
+    eth_call: 2
+    eth_getCode: 2
+    eth_getProof: 1
+    eth_sendTransaction: 1
+  latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+  # Cross-client standard (matches templates/geth): 64 sits inside every
+  # client's served recent-state window — geth pathdb serves only the last ~128
+  # blocks, and the compose caps Nethermind at FlatDb.MinReorgDepth=128 to keep
+  # memory bounded on long runs, so 64 stays safely inside both. 5s refresh
+  # keeps pinned blocks fresh as the replay advances the head.
+  recent_block_window: 64
+  min_pinned_window: 8
+  block_window_refresh_sec: 5
+  addresses:
+    - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  slots:
+    - "0x0"
+    - "0x1"
+    - "0x2"
+  eth_call_shapes:
+    - "0x18160ddd" # totalSupply()
+    - "0x313ce567" # decimals()
+    - "0x95d89b41" # symbol()
+    - "0x06fdde03" # name()
+
+# Mock-CL replay (advances head under locust load). Read by run_benchmark.sh,
+# NOT by the orchestrator. Override via env vars in .env.nethermind
+# (MOCK_CL_PAYLOADS, MOCK_CL_JWT, MOCK_CL_ENGINE_URL, MOCK_CL_LATENCY_CSV).
+mock_cl:
+  payloads: ""
+  jwt: ""
+  engine_url: "http://localhost:8552"
+
+# Overlayfs snapshot isolation (src/orchestrator/overlay.py). When enabled,
+# start_infra.sh stacks a Linux overlay on top of the pristine snapshot and
+# binds the merged dir into the container instead of the snapshot itself, so the
+# mock-CL replay's new blocks land in scratch (upperdir) and never mutate the
+# snapshot. `start_infra.sh` restores before every run (and on `down`), so each
+# client can be benchmarked from the exact same starting block.
+#
+# Requirements: Linux; mount privileges (sudo); scratch_dir on an xattr-capable
+# fs (ext4/xfs) with room for the run's writes — keep it on the big disk next to
+# the snapshot. Disabled by default: the raw snapshot is bind-mounted as before.
+overlay:
+  enabled: true
+  # Read-only lower layer = the pristine snapshot (matches NETHERMIND_DB_PATH).
+  lowerdir: "/mnt/bigdata/neth-x35-24358000-benchmark/mainnet"
+  # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
+  scratch_dir: "/mnt/bigdata/overlay/nethermind"
+  # Compose bind var repointed at <scratch_dir>/merged when enabled.
+  db_path_env: "NETHERMIND_DB_PATH"
+  name: "neth-bloatnet"
+  sudo: true

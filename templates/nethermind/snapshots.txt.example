@@ -1,0 +1,11 @@
+# Snapshot manifest for run_snapshot_matrix.sh — one snapshot per line.
+#   <snapshot_url> [payloads_file]
+# The block is taken from the URL (.../<client>/<block>/snapshot.tar.zst).
+# Payloads are PRE-STAGED per block; their first block must be <block>+1.
+# If the payloads column is omitted, it defaults to PAYLOADS_PATTERN
+#   (default: payloads_x35_<block>.jsonl, relative to the repo root).
+#
+# Copy this to snapshots.txt and edit. Lines beginning with # are ignored.
+
+https://snapshots.ethpandaops.io/perf-devnet-3/nethermind/24358000/snapshot.tar.zst  payloads_x35_24358000.jsonl
+# https://snapshots.ethpandaops.io/perf-devnet-3/nethermind/24600000/snapshot.tar.zst  payloads_x35_24600000.jsonl

@@ -1,0 +1,111 @@
+# Geth bloatnet node backed by a pre-synced snapshot on the host's disk.
+#
+# Self-contained template — start_infra.sh (in the repo root) brings this up
+# together with docker-compose.monitoring.yml and points it at
+# templates/geth/.env.geth. config_geth.yml in this directory has
+# infrastructure.manage: false so the orchestrator does NOT touch docker —
+# this script-managed stack is the canonical lifecycle.
+#
+# Conventions kept so the rest of the pipeline works unchanged:
+#   - service name "geth"              -> Prometheus scrape target geth:6060
+#   - container benchmark_geth         -> cAdvisor queries + runner's du-based DB sizing
+#   - shared benchmark_net network     -> monitoring stack can reach the node
+#
+# Snapshot isolation: when overlay.enabled is set in config_geth.yml,
+# start_infra.sh mounts an overlayfs over the snapshot and exports
+# GETH_DB_PATH=<scratch>/merged, so the bind below points at the overlay and the
+# mock-CL replay's writes never mutate the pristine snapshot. The snapshot is
+# restored before every run. See src/orchestrator/overlay.py.
+#
+# Host paths default to /mnt/bigdata/snapshots; override the GETH_* variables
+# in templates/geth/.env.geth if the host layout differs. The JWT secret is
+# mounted as its own volume at /jwt (GETH_JWT_PATH, default ./docker/jwtsecret)
+# — NOT taken from the snapshot — so the snapshot stays pristine and any
+# snapshot boots even if it ships no jwt.hex. mock-CL uses the same file.
+#
+# P2P is fully disabled: no peer sync. The snapshot is the canonical state
+# and the benchmark advances head via the mock-CL engine-API replay, not from
+# network peers (--maxpeers=0, --discovery.v4/v5=false, --port=0).
+#
+# Sync mode is intentionally NOT pinned to --syncmode=full or --gcmode=archive:
+# the bloatnet snapshot is snap-synced, so its freezer starts above genesis
+# (BlocksFirst ~21.9M, lastPivotNumber set, snapshotRoot set). Setting either
+# of those flags makes geth assume genesis-rooted block history on startup,
+# trips the freezer reconciliation, and fails with "truncation below tail".
+# Leave them at geth defaults (snap + full) which match the snapshot's shape.
+
+name: benchmark-clients
+
+networks:
+  default:
+    name: benchmark_net
+
+services:
+  geth:
+    image: ${GETH_IMAGE:-docker.ethquokkaops.io/dh/ethpandaops/geth:master}
+    container_name: benchmark_geth
+    tty: true
+    restart: unless-stopped
+    # Geth flushes its pathdb / dirty trie caches on shutdown — a SIGKILL
+    # forces a state regeneration on next boot, so allow a real graceful stop.
+    stop_grace_period: 300s
+    environment:
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+    volumes:
+      - ${GETH_DB_PATH:-/mnt/bigdata/snapshots}:/data
+      # JWT is infrastructure, NOT snapshot data — mount it as its own volume
+      # (same file mock-CL uses, mirrors the nethermind template's /jwt mount).
+      # Keeps the snapshot pristine and lets any snapshot boot without shipping
+      # a jwt.hex. Generate once with e.g. `openssl rand -hex 32 > docker/jwtsecret`.
+      - ${GETH_JWT_PATH:-../../docker/jwtsecret}:/jwt:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_RPC_PORT:-8545}:8545"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_WS_PORT:-8546}:8546"
+      - "${BIND_ADDR:-127.0.0.1}:${CLIENT_ENGINE_PORT:-8551}:8551"
+      # Host-side metrics publish is for debugging only — Prometheus scrapes
+      # geth:6060 internally over benchmark_net, so this mapping is not required
+      # for metrics collection. Defaults to 6061 because benchmark_nethermind
+      # already publishes host port 6060 (sharing it errors "port is already
+      # allocated"). Override GETH_METRICS_PORT in .env.geth if 6061 is taken too.
+      - "${BIND_ADDR:-127.0.0.1}:${GETH_METRICS_PORT:-6061}:6060" # Metrics (debug only)
+    command:
+      - --datadir=/data
+      - --networkid=${GETH_NETWORK_ID:-12159}
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=eth,net,web3,debug,admin
+      - --http.corsdomain=*
+      - --http.vhosts=*
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.api=eth,net,web3,debug,txpool,engine
+      - --ws.origins=*
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=*
+      - --authrpc.jwtsecret=/jwt
+      # No --syncmode / --gcmode: the snapshot is snap-synced, so the geth
+      # defaults (snap + full) match the on-disk freezer state. Forcing
+      # --syncmode=full or --gcmode=archive against a snap-synced DB triggers
+      # "truncation below tail" because their reconciliation logic expects
+      # genesis-rooted block history.
+      - --cache=4096
+      - --miner.gaslimit=1000000000
+      - --txpool.globalqueue=10000
+      - --txpool.globalslots=10000
+      - --override.osaka=1864841831
+      - --override.bpo1=1864841831
+      - --override.bpo2=1864841831
+      # P2P fully disabled — the snapshot is the canonical state and the
+      # benchmark advances head via the mock-CL replay, not from peers.
+      - --maxpeers=0
+      - --discovery.v4=false
+      - --discovery.v5=false
+      - --port=0
+      - --metrics
+      - --metrics.addr=0.0.0.0
+      - --metrics.port=6060
+      - --verbosity=${GETH_LOG_VERBOSITY:-3}

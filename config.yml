@@ -1,0 +1,216 @@
+infrastructure:
+  manage: true
+  ssh_command: "" # e.g. "ssh user@host", leave empty for local execution
+  # Grace period (seconds) passed to `compose down -t` for the clients stack.
+  # Compose's 10s default SIGKILLs clients that need a long graceful stop —
+  # Nethermind flat-DB flushes its in-memory state snapshot on StopAsync and a
+  # kill means a 1-2h rescan (or corruption) on the next boot of big datadirs.
+  stop_timeout_sec: 600
+  compose_paths:
+    monitoring: "docker/docker-compose.monitoring.yml"
+    clients: "docker/docker-compose.clients.yml"
+
+nodes:
+  rpc_url: "http://localhost:8545"
+  # Start a lighthouse-<client> consensus node alongside each EL client.
+  # Required for mainnet/sepolia sync (post-merge, EL clients only sync when a
+  # CL drives their engine API). Disable for pre-synced / externally-driven
+  # nodes. Overridable without editing this file via CONSENSUS=true|false in
+  # the repo-root .env (or the process environment).
+  consensus: true
+  # Consensus driver: "lighthouse" (real CL, default when consensus: true),
+  # "mock" (Engine-API mock CL for FROZEN milestone snapshots — see src/mock_cl),
+  # or "none". Back-compat: if unset, consensus: true -> lighthouse, false -> none.
+  # Overridable via CONSENSUS_MODE in the process environment or repo-root .env.
+  consensus_mode: "lighthouse"
+  # How long to wait for the client's JSON-RPC to come up after `docker compose up`.
+  rpc_startup_timeout_sec: 300
+  # Sync is only considered complete when eth_syncing is false AND the head
+  # block timestamp is at most this many seconds old (guards against clients
+  # reporting "not syncing" before sync has actually started). Freshness only
+  # applies to live sync (consensus_mode: lighthouse); frozen targets
+  # (mock/none) have historical heads and use the pivot number / the
+  # syncing-flag transition instead — see runner.sync_head_ok.
+  sync_head_freshness_sec: 120
+  # Absolute wall-clock cap (seconds) on the sync measurement. A sync still
+  # incomplete after this raises and fails that client's run instead of
+  # hanging the whole matrix forever.
+  sync_timeout_sec: 86400
+  clients:
+    - "geth"
+    - "nethermind"
+  data_dirs:
+    nethermind: "/nethermind/data"
+    geth: "/root/.ethereum"
+    besu: "/opt/besu/data"
+    reth: "/root/.local/share/reth"
+    erigon: "/home/erigon/.local/share/erigon"
+
+metrics:
+  prometheus_url: "http://localhost:9090"
+  # Range windows used by {window} substitution in queries.
+  # sync_window covers the sync phase; load_window covers the load-test phase.
+  sync_window: "1h"
+  load_window: "5m"
+
+  # Cross-client container/host queries. {client} -> "benchmark_<client>",
+  # {window} -> sync_window or load_window depending on phase.
+  queries:
+    cpu_percent_peak:           'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    cpu_percent_sustained:      'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    rss_peak_bytes:             'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes:        'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec:   'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak:  'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    net_rx_bytes_per_sec_avg:   'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    disk_iops_peak:             'max_over_time((rate(container_fs_reads_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time((rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+
+  # Per-client block-processing + gas/s queries. Metric names vary per client.
+  # Verify against each client's /metrics endpoint before relying on the values.
+  # Metrics with no data are logged and omitted from the output (not fatal).
+  client_queries:
+    nethermind:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(nethermind_blocks_gas_used[{window}])'
+    geth:
+      # Geth emits go-metrics summaries, not histograms — histogram_quantile()
+      # returns empty against them. chain_inserts = TOTAL block-import time in
+      # nanoseconds (chain_execution is only the EVM phase, ~2x understated).
+      # chain_inserts is a ResettingTimer (quantiles cover only the last scrape
+      # interval), so wrap in avg_over_time to cover {window}: a time-average
+      # of per-interval quantiles, not a true windowed quantile — the closest
+      # go-metrics allows. Consistent per-client across milestones, but not the
+      # same quantity as the other clients' windowed histogram_quantile.
+      block_proc_p50: 'avg_over_time(chain_inserts{quantile="0.5"}[{window}]) / 1e9'
+      block_proc_p95: 'avg_over_time(chain_inserts{quantile="0.95"}[{window}]) / 1e9'
+      block_proc_p99: 'avg_over_time(chain_inserts{quantile="0.99"}[{window}]) / 1e9'
+      # Geth has NO cumulative gas counter (chain/head/* gauges are block
+      # numbers only). chain_mgasps records per-block EXECUTION throughput
+      # (gas / execution time, in Mgas/s) — a different quantity than
+      # nethermind's wall-clock rate(...gas_used); compare per-client across
+      # milestones, not across clients.
+      gas_per_sec:    'avg_over_time(chain_mgasps{quantile="0.5"}[{window}]) * 1e6'
+    besu:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(besu_blockchain_chain_head_gas_used[{window}])'
+    reth:
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))'
+      gas_per_sec:    'rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6'
+    erigon:
+      # UNVERIFIED (no erigon template yet): upstream registers block execution
+      # as the SUMMARY chain_execution_seconds, so these _bucket queries likely
+      # return nothing — revisit against a live /metrics before first use.
+      # gas_per_sec was dropped: erigon has no chain_head_gas_used metric.
+      block_proc_p50: 'histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
+      block_proc_p95: 'histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
+      block_proc_p99: 'histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))'
+
+  # Fraction by which a metric must change in the bad direction (lower for
+  # latency-style metrics, higher for throughput-style ones) before the
+  # aggregator flags it as a regression. 0.25 = 25%.
+  regression_threshold: 0.25
+
+  # Above this aggregate Locust failure ratio the run's rpc_* latency /
+  # throughput metrics are suppressed (Locust records response times for
+  # failed requests too, so an all-errors run would otherwise read as
+  # excellent low latency and pass the regression gate).
+  max_failure_ratio: 0.1
+
+  # Higher-is-better metrics. The aggregator's regression check flips sign for
+  # these. Only TRUE throughput metrics belong here — at a fixed workload more
+  # disk IOPS / network traffic usually means thrashing (worse), so IO/net
+  # metrics stay lower-is-better.
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+
+load_test:
+  run_time: "5m"
+  users: 50
+  spawn_rate: 10
+  # Wait time between requests per simulated user (seconds).
+  wait_time:
+    min: 0.1
+    max: 0.5
+  # Gas-paying tasks (eth_sendTransaction) spend real gas and need an unlocked
+  # account on the node — only enable against dev/throwaway networks.
+  gas_tests_enabled: false
+  # Per-method task weights — Locust picks tasks weighted by these values.
+  task_weights:
+    eth_getBalance: 3
+    eth_getStorageAt: 3
+    eth_call: 2
+    eth_getCode: 2
+    eth_getProof: 1
+    eth_sendTransaction: 1  # only used when gas_tests_enabled is true
+  # Prometheus histogram buckets (milliseconds) for locust_request_latency_ms.
+  latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+  # How many recent blocks to sample from (calls hit random blocks in [head-N, head]).
+  # At test start the locustfile probes how deep the node can actually serve
+  # state and clamps the window to that band; pruned nodes (e.g. Nethermind
+  # with FlatDb) typically retain far fewer blocks than requested here.
+  recent_block_window: 1000
+  # If the node's servable band (after the safety margin) is shallower than
+  # this, pinned block numbers would go stale mid-run — fall back to "latest".
+  min_pinned_window: 8
+  # How often (seconds) to re-pin the block window to the advancing head.
+  block_window_refresh_sec: 30
+  addresses:
+    - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  slots:
+    - "0x0"
+    - "0x1"
+    - "0x2"
+  # Representative read-heavy eth_call shapes (ERC-20 style). Hex calldata only.
+  eth_call_shapes:
+    - "0x18160ddd"  # totalSupply()
+    - "0x313ce567"  # decimals()
+    - "0x95d89b41"  # symbol()
+    - "0x06fdde03"  # name()
+
+# Mock consensus layer (Engine-API driver) for FROZEN milestone snapshots.
+# Only used when nodes.consensus_mode is "mock". Post-merge EL clients won't
+# snap-sync or execute blocks without a CL driving their Engine API; a frozen
+# snapshot has no live CL, so this drives it directly. See src/mock_cl.
+# NOTE: for Nethermind targets, --Sync.StaticSnapPivot (nethermind#11943) is the
+# native alternative to pivot mode — set consensus_mode: none and pass that flag.
+# The orchestrator always launches the PIVOT driver here (replay is launched by
+# the templates' run_benchmark.sh, or run `python -m mock_cl replay` directly).
+mock_cl:
+  engine_url: "http://localhost:8551"   # EL Engine API endpoint (authrpc)
+  jwt: ""                                # path to jwt.hex OR a raw 0x/hex secret
+  pivot:
+    hash: ""                             # frozen pivot block hash (0x...)
+    number: null                         # frozen pivot block number (optional)
+    interval: 12                         # seconds between forkchoiceUpdated ticks
+  replay:
+    payloads: ""                         # JSONL payloads file (see src/mock_cl/payloads.py; build with scripts/rlp_to_mocks.py)
+    count: null                          # replay at most this many blocks (null = all)
+    latency_csv: ""                      # write per-block latency rows here (optional)
+    newpayload_version: null             # force engine_newPayload version (e.g. 4 for Prague); null = per-record/auto
+
+# Overlayfs snapshot isolation (src/orchestrator/overlay.py). Only acted on when
+# infrastructure.manage is true: the runner mounts a Linux overlay on top of the
+# pristine snapshot before `compose up` (restoring first, so every run starts
+# clean), repoints the client's DB bind var at the merged dir, and unmounts +
+# wipes scratch on teardown — leaving the snapshot pristine for the next client.
+# Use with a snapshot-backed compose file (e.g. docker-compose.nethermind-mainnet.yml).
+#
+# Requirements: Linux; mount privileges (sudo); scratch_dir on an xattr-capable
+# fs (ext4/xfs) with room for the run's writes. Disabled by default — the
+# configured bind mount / named volume is used unchanged.
+overlay:
+  enabled: false
+  lowerdir: "/mnt/bigdata/snapshot_mainnet_neth/mainnet"  # pristine snapshot (matches NETHERMIND_DB_PATH)
+  scratch_dir: "/mnt/bigdata/overlay/nethermind"          # holds upper/ work/ merged/ (beside lowerdir if omitted)
+  db_path_env: "NETHERMIND_DB_PATH"                        # compose bind var repointed at <scratch_dir>/merged
+  name: "mainnet-overlay"
+  sudo: true

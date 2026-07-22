@@ -1,0 +1,194 @@
+# Benchmark config for the geth bloatnet template.
+#
+# Differences from the repo-root config_geth.yml:
+#   - infrastructure.manage: false       (start_infra.sh owns the lifecycle)
+#   - prometheus_url is the fallback only. The aggregator prefers the
+#     PROMETHEUS_PORT (or PROMETHEUS_URL) env var that .env.geth already sets,
+#     so this stays in sync with the scripts. On hosts where an unrelated
+#     Prometheus owns :9090, the benchmark stack is mapped elsewhere (:9092 in
+#     .env.geth); pointing the aggregator at :9090 there hits the wrong server
+#     and silently drops every cAdvisor metric.
+#   - disk_iops_peak / disk_throughput_peak wrapped in sum() so the aggregator
+#     records the device-aggregate peak, not an arbitrary per-device series
+
+infrastructure:
+  manage: false
+  ssh_command: ""
+  # Unused when manage=false but kept for reference / `--phase sync` reruns.
+  compose_paths:
+    monitoring: "templates/geth/docker-compose.monitoring.yml"
+    clients: "templates/geth/docker-compose.geth-bloatnet.yml"
+
+nodes:
+  # Geth RPC host port (matches CLIENT_RPC_PORT in .env.geth; 8549 avoids
+  # clashing with anything already on 8545 on the host).
+  rpc_url: "http://localhost:8549"
+  consensus: false
+  # The orchestrator's built-in mock-CL auto-start is pivot-only (snap-sync
+  # from empty). The bloatnet snapshot is already at head, so we want REPLAY,
+  # not pivot — and run_benchmark.sh launches it directly alongside locust.
+  # Keeping consensus_mode: none stops the runner from trying anything.
+  consensus_mode: "none"
+  rpc_startup_timeout_sec: 300
+  sync_head_freshness_sec: 120
+  clients:
+    - "geth"
+  data_dirs:
+    nethermind: "/nethermind/data/nethermind_db/mainnet"
+    geth: "/data"
+    besu: "/opt/besu/data"
+    reth: "/root/.local/share/reth"
+    erigon: "/home/erigon/.local/share/erigon"
+
+metrics:
+  # Fallback only — PROMETHEUS_PORT/PROMETHEUS_URL from .env.geth take precedence.
+  prometheus_url: "http://localhost:9092"
+  sync_window: "1h"
+  load_window: "5m"
+
+  # Cross-client container/host queries. {client} -> "benchmark_<client>",
+  # {window} -> sync_window or load_window depending on phase.
+  queries:
+    cpu_percent_peak: 'max_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    cpu_percent_sustained: 'avg_over_time((rate(container_cpu_usage_seconds_total{name="benchmark_{client}"}[1m]) * 100)[{window}:1m])'
+    rss_peak_bytes: 'max_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_sustained_bytes: 'avg_over_time(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    rss_growth_bytes_per_sec: 'deriv(container_memory_rss{name="benchmark_{client}"}[{window}])'
+    net_rx_bytes_per_sec_peak: 'max_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    net_rx_bytes_per_sec_avg: 'avg_over_time(rate(container_network_receive_bytes_total{name="benchmark_{client}"}[1m])[{window}:1m])'
+    # sum() across devices: container_fs_* returns one series per backing
+    # block device. Without the sum() the aggregator's result[0] is whichever
+    # device Prometheus happens to return first (usually the idle one).
+    disk_iops_peak: 'max_over_time(sum(rate(container_fs_reads_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+    disk_throughput_peak_bytes_per_sec: 'max_over_time(sum(rate(container_fs_reads_bytes_total{name="benchmark_{client}"}[1m]) + rate(container_fs_writes_bytes_total{name="benchmark_{client}"}[1m]))[{window}:1m])'
+
+  client_queries:
+    nethermind:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(nethermind_block_processing_microseconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(nethermind_blocks_gas_used[{window}])"
+    geth:
+      # Geth emits go-metrics summaries, not histograms. chain_inserts = TOTAL
+      # block-import time; chain_execution is only the EVM-execution phase of it
+      # (~40-60% at bloatnet scale) — using it here understated geth block-proc
+      # by ~2x vs Nethermind's full-pipeline gauge (fixed 2026-07-10).
+      # NOTE: the first run after this switch shows a one-time ~2x block_proc
+      # jump vs milestones recorded with chain_execution — an expected metric
+      # correction, not a client regression (--fail-on-regression will trip).
+      # chain_inserts is a ResettingTimer (quantiles cover only the last scrape
+      # interval), so wrap in avg_over_time to cover {window}: a time-average
+      # of per-interval quantiles — the closest go-metrics allows, consistent
+      # per-client across milestones.
+      block_proc_p50: 'avg_over_time(chain_inserts{quantile="0.5"}[{window}]) / 1e9'
+      block_proc_p95: 'avg_over_time(chain_inserts{quantile="0.95"}[{window}]) / 1e9'
+      block_proc_p99: 'avg_over_time(chain_inserts{quantile="0.99"}[{window}]) / 1e9'
+      # Geth has NO cumulative gas counter (chain/head/* gauges are block
+      # numbers). chain_mgasps = per-block EXECUTION throughput (Mgas/s) — a
+      # different quantity than nethermind's wall-clock rate(...gas_used);
+      # compare per-client across milestones, not across clients.
+      gas_per_sec: 'avg_over_time(chain_mgasps{quantile="0.5"}[{window}]) * 1e6'
+    besu:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(besu_blockchain_chain_head_block_processing_duration_seconds_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(besu_blockchain_chain_head_gas_used[{window}])"
+    reth:
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(reth_sync_execution_execution_duration_bucket[{window}])) by (le))"
+      gas_per_sec: "rate(reth_sync_execution_mgas_processed_total[{window}]) * 1e6"
+    erigon:
+      # UNVERIFIED (no erigon template yet); gas_per_sec dropped — erigon has
+      # no chain_head_gas_used metric.
+      block_proc_p50: "histogram_quantile(0.5,  sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      block_proc_p95: "histogram_quantile(0.95, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+      block_proc_p99: "histogram_quantile(0.99, sum(rate(exec_block_processing_seconds_bucket[{window}])) by (le))"
+
+  regression_threshold: 0.25
+
+  # Above this aggregate Locust failure ratio the run's rpc_* metrics are
+  # suppressed (a mostly-erroring run would otherwise read as fast).
+  max_failure_ratio: 0.1
+
+  # Only TRUE throughput metrics — at a fixed workload more disk IOPS /
+  # network traffic usually means thrashing (worse), so IO/net metrics stay
+  # lower-is-better.
+  higher_is_better:
+    - "rpc_requests_sec"
+    - "gas_per_sec"
+
+load_test:
+  run_time: "5m"
+  users: 50
+  spawn_rate: 10
+  wait_time:
+    min: 0.1
+    max: 0.5
+  gas_tests_enabled: false
+  task_weights:
+    eth_getBalance: 3
+    eth_getStorageAt: 3
+    eth_call: 2
+    eth_getCode: 2
+    eth_getProof: 1
+    eth_sendTransaction: 1
+  latency_buckets: [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+  # Cross-client standard: 64 sits inside every client's served recent-state
+  # window (geth pathdb serves only the last ~128 blocks; not configurable like
+  # Nethermind's FlatDb.MinReorgDepth). 5s refresh keeps pinned blocks fresh as
+  # the replay advances the head, so they never age out of the served window.
+  recent_block_window: 64
+  min_pinned_window: 8
+  block_window_refresh_sec: 5
+  addresses:
+    - "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    - "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  slots:
+    - "0x0"
+    - "0x1"
+    - "0x2"
+  eth_call_shapes:
+    - "0x18160ddd" # totalSupply()
+    - "0x313ce567" # decimals()
+    - "0x95d89b41" # symbol()
+    - "0x06fdde03" # name()
+
+# Mock-CL replay (advances head under locust load). Read by run_benchmark.sh,
+# NOT by the orchestrator: with infrastructure.manage: false the runner skips
+# the start_infrastructure() path that consumes this section in the repo-root
+# config. Kept here as documentation of the values run_benchmark.sh expects.
+# Override any of these via env vars in .env.geth (MOCK_CL_PAYLOADS,
+# MOCK_CL_JWT, MOCK_CL_ENGINE_URL, MOCK_CL_LATENCY_CSV).
+mock_cl:
+  # Default: templates/geth/payloads/<milestone>.jsonl. Drop a CL-recorded
+  # JSONL there; without it run_benchmark.sh skips replay and warns.
+  payloads: ""
+  # JWT secret. Defaults to the repo-tracked docker/jwtsecret — the same file
+  # the compose mounts into the geth container at /jwt.
+  jwt: ""
+  # run_benchmark.sh derives the real URL from CLIENT_ENGINE_PORT in .env.geth.
+  engine_url: "http://localhost:8552"
+
+# Overlayfs snapshot isolation (src/orchestrator/overlay.py). When enabled,
+# start_infra.sh stacks a Linux overlay on top of the pristine snapshot and
+# binds the merged dir into the container instead of the snapshot itself, so the
+# mock-CL replay's new blocks land in scratch (upperdir) and never mutate the
+# snapshot. `start_infra.sh` restores before every run (and on `down`), so each
+# client can be benchmarked from the exact same starting block.
+#
+# Geth mounts the snapshot ROOT at /data (chaindata under geth/), so lowerdir
+# is the whole GETH_DB_PATH directory. Requirements: Linux; mount privileges
+# (sudo); scratch_dir on an xattr-capable fs (ext4/xfs) on the big disk with
+# room for the run's writes. Disabled by default (raw snapshot bind-mounted).
+overlay:
+  enabled: true
+  # Read-only lower layer = the pristine snapshot datadir (must match
+  # GETH_DB_PATH in .env.geth). perf-devnet-3 geth @ block 24358000.
+  lowerdir: "/mnt/bigdata/geth-x35-24358000-benchmark"
+  # Holds upper/ work/ merged/. Defaults beside lowerdir when omitted.
+  scratch_dir: "/mnt/bigdata/overlay/geth"
+  # Compose bind var repointed at <scratch_dir>/merged when enabled.
+  db_path_env: "GETH_DB_PATH"
+  name: "geth-bloatnet"
+  sudo: true

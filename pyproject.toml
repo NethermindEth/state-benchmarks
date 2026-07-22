@@ -1,0 +1,25 @@
+[project]
+name = "state-benchmarks"
+version = "0.1.0"
+description = "Benchmarking harness for Ethereum execution clients: sync time, system metrics, and JSON-RPC load tests with cross-milestone regression detection"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "locust>=2.44.0",
+    "prometheus-client>=0.20.0",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires Docker; runs the docker/docker-compose.test.yml stack",
+]
+# Default: skip integration tests. Opt in with: uv run pytest -m integration
+addopts = "-m 'not integration'"

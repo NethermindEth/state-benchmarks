@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node_exporter:9100']
+
+  - job_name: 'test_client'
+    metrics_path: /debug/metrics/prometheus
+    static_configs:
+      - targets: ['test-client:6060']
+
+  # Locust runs on the HOST as a subprocess of runner.py, not in a container.
+  # We list both hostnames so this works across environments:
+  #   - host.docker.internal: Docker Desktop on Mac/Windows (and Linux via the
+  #     `extra_hosts: host.docker.internal:host-gateway` mapping on prometheus).
+  #   - host.orb.internal: OrbStack rootless (host-gateway points at the
+  #     rootlesskit netns, which is NOT the actual host; OrbStack provides this
+  #     special hostname instead).
+  # Only one will be UP at a time; the other reports DOWN. That's fine — the
+  # dashboard queries aggregate across `instance`.
+  # The target is also DOWN whenever no benchmark is running.
+  - job_name: 'locust'
+    static_configs:
+      - targets:
+          - 'host.docker.internal:9646'
+          - 'host.orb.internal:9646'
