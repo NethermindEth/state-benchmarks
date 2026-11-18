@@ -69,6 +69,9 @@ services:
   besu:
     image: ${BESU_IMAGE:-hyperledger/besu:latest}
     container_name: benchmark_besu
+    environment:
+      # Mitigate CVE-2026-114938 until the bundled JVM is patched.
+      JAVA_TOOL_OPTIONS: "-XX:+UnlockDiagnosticVMOptions -XX:-UseBASE64Intrinsics"
     volumes:
       - besu_data:/opt/besu/data
       - ./jwtsecret:/jwt/jwtsecret:ro
